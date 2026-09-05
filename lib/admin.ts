@@ -1,6 +1,7 @@
 import { assert, DAY, id, now } from './core';
 import {
   audit,
+  authReadiness,
   db,
   defaultSettings,
   encrypt,
@@ -11,8 +12,11 @@ import {
   rows,
   secretKeys,
   settings,
+  smtpPayload,
   stmt,
   text,
+  throttle,
+  workerFetch,
   type User,
 } from './server';
 import { initialArticles } from './content';
@@ -53,7 +57,21 @@ export async function adminAction(
   action: string,
   b: any,
 ) {
-  if (action === 'initialize') {
+  if (action === 'mail-test') {
+    await throttle('mail-test:' + u.id, 3, 300);
+    const s = await settings();
+    assert(
+      authReadiness({ ...s, mail_enabled: true }).mail_ready,
+      '请先保存完整的 SMTP 与执行服务器配置',
+    );
+    await workerFetch(s, '/mail', {
+      email: u.email,
+      purpose: 'test',
+      smtp: smtpPayload(s),
+    });
+    await audit(req, u.id, 'admin.mail-test', u.email);
+    return { message: '测试邮件已提交给邮件服务器，请检查管理员邮箱' };
+  } else if (action === 'initialize') {
     await db().batch([
       ...[
         {
@@ -99,6 +117,19 @@ export async function adminAction(
     ]);
   } else if (action === 'settings') {
     const current = await settings();
+    const merged = {
+      ...current,
+      ...Object.fromEntries(
+        Object.entries(b).filter(
+          ([k, v]) => !secretKeys.includes(k) || v !== '',
+        ),
+      ),
+    };
+    if (merged.mail_enabled)
+      assert(
+        authReadiness(merged).mail_ready,
+        '启用邮件前请先填写 SMTP、授权码和执行服务器设置',
+      );
     if (b.turnstile_enabled === true)
       assert(
         (b.turnstile_secret || current.turnstile_secret) &&
@@ -124,17 +155,30 @@ export async function adminAction(
         [
           'invite_required',
           'turnstile_enabled',
+          'mail_enabled',
           'epay_alipay',
           'epay_wxpay',
           'terms_confirmed',
         ].includes(k)
       )
         assert(typeof v === 'boolean', '设置值应为开关');
+      else if (k === 'smtp_port')
+        assert(v === 465, '当前邮件服务使用 465 端口和 SSL/TLS');
       else if (k === 'login_failure_threshold') int(v, 3, 30, '失败次数');
       else if (['login_window_seconds', 'ip_ban_seconds'].includes(k))
         int(v, 60, 86400, '时长');
       else if (k === 'retention_days') int(v, 30, 3650, '保存天数');
       else assert(typeof v === 'string' && v.length <= 2048, '设置值过长');
+      if (k === 'smtp_host')
+        assert(
+          typeof v === 'string' && /^[a-z0-9.-]+$/i.test(v),
+          'SMTP 主机格式无效',
+        );
+      if (['smtp_user', 'smtp_from'].includes(k) && v)
+        assert(
+          typeof v === 'string' && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(v),
+          '请输入有效邮件地址',
+        );
       if (['worker_url', 'epay_url'].includes(k) && v) {
         const url = new URL(String(v));
         assert(

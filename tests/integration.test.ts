@@ -6,6 +6,8 @@ import { createOrder, settleOrder } from '../lib/commerce.ts';
 import { saveConfig, getConfig, purgeExpired } from '../lib/configs.ts';
 import { encrypt, stmt, one, hash, turnstile } from '../lib/server.ts';
 import { createBackup, restoreBackup } from '../lib/backup.ts';
+import { setupAdmin, setupAvailable, login, sendCode } from '../lib/auth.ts';
+import { adminAction, adminSnapshot } from '../lib/admin.ts';
 import { GET, POST } from '../app/api/[...path]/route.ts';
 const req = new Request('https://msboost.de/api/orders', {
   method: 'POST',
@@ -81,6 +83,64 @@ const source = JSON.stringify({
   socks5Port: 1080,
 });
 test('payment, expiry, storage and access integration', async (t) => {
+  await t.test(
+    'owner setup works before SMTP and is single use; existing owner login remains available',
+    async () => {
+      fixture();
+      env.ADMIN_SETUP_TOKEN = 'setup-test-'.repeat(5);
+      const credentials = {
+        email: env.OWNER_EMAIL,
+        password: 'setup-password-test',
+        setup_token: env.ADMIN_SETUP_TOKEN,
+      };
+      try {
+        await assert.rejects(() =>
+          setupAdmin(req, { ...credentials, setup_token: 'invalid' }),
+        );
+        await assert.rejects(() =>
+          setupAdmin(req, { ...credentials, email: 'other@qq.com' }),
+        );
+        const initialized = await setupAdmin(req, credentials);
+        assert.ok(initialized.cookie.includes('HttpOnly'));
+        assert.equal(await setupAvailable(), false);
+        await assert.rejects(() => setupAdmin(req, credentials));
+        assert.ok((await login(req, credentials)).cookie);
+        await assert.rejects(
+          () => sendCode(req, { email: env.OWNER_EMAIL, purpose: 'register' }),
+          /邮件发送尚未启用/,
+        );
+      } finally {
+        delete env.ADMIN_SETUP_TOKEN;
+      }
+    },
+  );
+  await t.test(
+    'SMTP settings encrypt the authorization code and redact it from the administrator response',
+    async () => {
+      fixture();
+      const admin = { ...user, role: 'admin' };
+      await adminAction(req, admin, 'settings', {
+        smtp_host: 'smtp.qq.com',
+        smtp_port: 465,
+        smtp_user: 'owner@qq.com',
+        smtp_from: 'owner@qq.com',
+        smtp_password: 'test-smtp-authorization',
+        mail_enabled: false,
+      });
+      assert.ok(
+        !(
+          await one("SELECT value FROM settings WHERE key='smtp_password'")
+        ).value.includes('test-smtp-authorization'),
+      );
+      const state = await adminSnapshot();
+      assert.equal(state.settings.smtp_password_configured, true);
+      assert.equal(state.settings.smtp_password, undefined);
+      await assert.rejects(
+        () => adminAction(req, admin, 'settings', { mail_enabled: true }),
+        /启用邮件前/,
+      );
+    },
+  );
   await t.test(
     'Turnstile can be disabled without an external verification call',
     async () => {

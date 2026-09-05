@@ -17,6 +17,18 @@ class FakeProcess:
     def wait(self, timeout=None): return -9
 
 class OperationsTests(unittest.TestCase):
+    def test_backend_smtp_configuration_uses_tls_and_saved_credentials(self):
+        data = {'email': 'owner@qq.com', 'purpose': 'test', 'smtp': {'host': 'smtp.qq.com', 'port': 465, 'username': 'sender@qq.com', 'password': 'smtp-test-secret', 'from': 'sender@qq.com'}}
+        with patch.object(worker.socket, 'getaddrinfo', return_value=[(2, 1, 6, '', ('8.8.8.8', 465))]), patch.object(worker.smtplib, 'SMTP_SSL') as client:
+            worker.send_mail(data)
+            client.return_value.__enter__.return_value.login.assert_called_once_with('sender@qq.com', 'smtp-test-secret')
+            sent = client.return_value.__enter__.return_value.send_message.call_args.args[0]
+            self.assertEqual(sent['To'], 'owner@qq.com')
+            self.assertNotIn('smtp-test-secret', sent.as_string())
+            self.assertIsNotNone(client.call_args.kwargs['context'])
+        with patch.object(worker.socket, 'getaddrinfo', return_value=[(2, 1, 6, '', ('127.0.0.1', 465))]), patch.object(worker.smtplib, 'SMTP_SSL') as client:
+            with self.assertRaises(ValueError): worker.send_mail(data)
+            client.assert_not_called()
     def rule(self):
         return dict(id='a'*32,target_ip='8.8.8.8',target_port=45001,protocol='TCP',listen_port=31000,expires_at=1100,speed_mbps=50,revision=1)
     def test_gost_uses_aggregate_speed_in_bytes_not_per_connection(self):

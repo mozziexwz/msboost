@@ -1,6 +1,7 @@
 import { assert, apiParams, DAY, id, now, publicIp } from '@/lib/core';
 import {
   audit,
+  authReadiness,
   clientIp,
   currentUser,
   db,
@@ -19,7 +20,14 @@ import {
   throttle,
   workerFetch,
 } from '@/lib/server';
-import { login, register, resetPassword, sendCode } from '@/lib/auth';
+import {
+  login,
+  register,
+  resetPassword,
+  sendCode,
+  setupAdmin,
+  setupAvailable,
+} from '@/lib/auth';
 import {
   checkPayment,
   createOrder,
@@ -135,13 +143,8 @@ async function handle(req: Request) {
             invite_required: s.invite_required,
             turnstile_enabled: s.turnstile_enabled,
             turnstile_site_key: s.turnstile_site_key,
-            auth_ready: Boolean(
-              env.APP_ENCRYPTION_KEY &&
-              (!s.turnstile_enabled ||
-                (s.turnstile_secret && s.turnstile_site_key)) &&
-              s.worker_url &&
-              s.worker_token,
-            ),
+            ...authReadiness(s),
+            setup_available: await setupAvailable(),
           },
           articles: initialArticles
             .filter((a) => ['terms', 'privacy'].includes(a.id))
@@ -176,13 +179,7 @@ async function handle(req: Request) {
           terms_confirmed: s.terms_confirmed,
           support_email: s.support_email,
           worker_ready: Boolean(s.worker_url && s.worker_token),
-          auth_ready: Boolean(
-            env.APP_ENCRYPTION_KEY &&
-            (!s.turnstile_enabled ||
-              (s.turnstile_secret && s.turnstile_site_key)) &&
-            s.worker_url &&
-            s.worker_token,
-          ),
+          ...authReadiness(s),
         },
         lines,
         plans,
@@ -218,6 +215,10 @@ async function handle(req: Request) {
         : {};
     if (method === 'POST' && path === 'auth/code')
       return json(await sendCode(req, b));
+    if (method === 'POST' && path === 'auth/setup') {
+      const result = await setupAdmin(req, b);
+      return json({ ok: true }, 200, { 'Set-Cookie': result.cookie });
+    }
     if (method === 'POST' && ['auth/login', 'auth/register'].includes(path)) {
       const result = await (path === 'auth/login'
         ? login(req, b)

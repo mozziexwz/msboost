@@ -127,6 +127,11 @@ export async function decrypt(value: string) {
 export const defaultSettings: Record<string, any> = {
   invite_required: true,
   turnstile_enabled: false,
+  mail_enabled: false,
+  smtp_host: 'smtp.qq.com',
+  smtp_port: 465,
+  smtp_user: '',
+  smtp_from: '',
   login_failure_threshold: 8,
   login_window_seconds: 900,
   ip_ban_seconds: 1800,
@@ -141,7 +146,37 @@ export const defaultSettings: Record<string, any> = {
   retention_days: 90,
   terms_confirmed: false,
 };
-export const secretKeys = ['turnstile_secret', 'epay_key', 'worker_token'];
+export const secretKeys = [
+  'turnstile_secret',
+  'epay_key',
+  'worker_token',
+  'smtp_password',
+];
+export function authReadiness(s: Record<string, any>) {
+  const login_ready = Boolean(
+    env.APP_ENCRYPTION_KEY &&
+    (!s.turnstile_enabled || (s.turnstile_site_key && s.turnstile_secret)),
+  );
+  const mail_ready = Boolean(
+    s.mail_enabled &&
+    s.worker_url &&
+    s.worker_token &&
+    s.smtp_host &&
+    s.smtp_user &&
+    s.smtp_from &&
+    s.smtp_password,
+  );
+  return { login_ready, mail_ready, auth_ready: login_ready && mail_ready };
+}
+export function smtpPayload(s: Record<string, any>) {
+  return {
+    host: s.smtp_host,
+    port: s.smtp_port,
+    username: s.smtp_user,
+    password: s.smtp_password,
+    from: s.smtp_from,
+  };
+}
 export async function settings() {
   const result: Record<string, any> = {
     ...defaultSettings,

@@ -1,6 +1,7 @@
 import { assert, DAY, equal, id, normalizeEmail, now } from './core';
 import {
   audit,
+  authReadiness,
   clientIp,
   db,
   env,
@@ -11,15 +12,62 @@ import {
   passwordHash,
   passwordValid,
   settings,
+  smtpPayload,
   stmt,
   throttle,
   turnstile,
   workerFetch,
 } from './server';
+export async function setupAvailable() {
+  return Boolean(
+    env.APP_ENCRYPTION_KEY &&
+    typeof env.ADMIN_SETUP_TOKEN === 'string' &&
+    env.ADMIN_SETUP_TOKEN.length >= 32 &&
+    env.OWNER_EMAIL &&
+    !(await one("SELECT id FROM users WHERE role='admin' LIMIT 1")),
+  );
+}
+export async function setupAdmin(req: Request, b: any) {
+  await throttle('setup:' + clientIp(req), 5, 900);
+  assert(await setupAvailable(), '管理员初始化未启用或已完成', 403);
+  assert(
+    typeof b.setup_token === 'string' &&
+      equal(b.setup_token, env.ADMIN_SETUP_TOKEN),
+    '初始化密钥无效',
+    403,
+  );
+  const email = normalizeEmail(b.email);
+  assert(
+    email === String(env.OWNER_EMAIL).trim().toLowerCase(),
+    '请输入部署时指定的管理员 QQ 邮箱',
+    403,
+  );
+  const uid = id(),
+    pw = await passwordHash(b.password);
+  await stmt(
+    "INSERT INTO users(id,email,password,role,created_at) SELECT ?,?,?,'admin',? WHERE NOT EXISTS(SELECT 1 FROM users WHERE role='admin')",
+    uid,
+    email,
+    pw,
+    now(),
+  ).run();
+  assert(
+    await one('SELECT id FROM users WHERE id=?', uid),
+    '管理员已初始化',
+    409,
+  );
+  await audit(req, uid, 'admin.setup', email);
+  return startSession(req, uid);
+}
 export async function sendCode(req: Request, b: any) {
   const s = await settings(),
     email = normalizeEmail(b.email);
   assert(['register', 'reset'].includes(b.purpose), '无效的验证码用途');
+  assert(
+    authReadiness(s).mail_ready,
+    '邮件发送尚未启用，请联系管理员；已有账号仍可登录',
+    503,
+  );
   await throttle('mail-ip:' + clientIp(req), 10, 3600);
   await throttle('mail:' + email, 1, 60);
   await turnstile(req, b.token, 'email', s);
@@ -37,7 +85,12 @@ export async function sendCode(req: Request, b: any) {
     t,
   ).run();
   try {
-    await workerFetch(s, '/mail', { email, code, purpose: b.purpose });
+    await workerFetch(s, '/mail', {
+      email,
+      code,
+      purpose: b.purpose,
+      smtp: smtpPayload(s),
+    });
   } catch (e) {
     await stmt(
       'UPDATE email_codes SET consumed=1 WHERE email=? AND digest=?',

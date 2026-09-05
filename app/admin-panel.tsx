@@ -61,7 +61,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
         setSecret(
           `线路 ID：${r.id || b.id}\nNODE_TOKEN=${r.node_token}\n\n只显示此次。请保存到你自己的线路服务器配置文件中。`,
         );
-      setSuccess('已保存');
+      setSuccess(r.message || '已保存');
       setEdit(null);
       await load();
       onRefresh();
@@ -269,7 +269,11 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
             </div>
           </div>
           <div className="settings-section">
-            <h3>一次性部署与邮件服务器</h3>
+            <h3>一次性部署与邮件执行服务器</h3>
+            <p className="muted">
+              填写运营 VPS 上邮件与部署服务的 HTTPS 地址。SMTP
+              设置在下方单独保存。
+            </p>
             <div className="form-grid">
               {[
                 ['worker_url', 'HTTPS 服务地址'],
@@ -295,6 +299,76 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                 </Field>
               ))}
             </div>
+          </div>
+          <div className="settings-section">
+            <h3>邮件发送 · SMTP</h3>
+            <div className="setting-toggle">
+              <div>
+                <b>启用验证码邮件</b>
+                <p>可稍后配置；关闭时暂停注册和找回密码，已有账号仍可登录。</p>
+              </div>
+              <Switch
+                checked={s.mail_enabled}
+                onCheckedChange={(v) =>
+                  setData({ ...data, settings: { ...s, mail_enabled: v } })
+                }
+                aria-label="启用验证码邮件"
+              />
+            </div>
+            <p className="muted">
+              QQ 邮箱：SMTP 服务器 smtp.qq.com，端口 465，SSL/TLS。授权码在 QQ
+              邮箱设置中开启 SMTP 后获取。
+            </p>
+            <div className="form-grid">
+              {[
+                ['smtp_host', 'SMTP 服务器'],
+                ['smtp_port', 'SMTP 端口（SSL/TLS）'],
+                ['smtp_user', 'SMTP 登录邮箱'],
+                ['smtp_from', '发件人邮箱'],
+                ['smtp_password', 'SMTP 授权码'],
+              ].map(([k, l]) => (
+                <Field
+                  key={k}
+                  label={l}
+                  hint={s[k + '_configured'] ? '已配置；留空保留' : undefined}
+                >
+                  <Input
+                    type={
+                      k === 'smtp_password'
+                        ? 'password'
+                        : k === 'smtp_port'
+                          ? 'number'
+                          : 'text'
+                    }
+                    autoComplete="off"
+                    value={s[k] ?? ''}
+                    onChange={(e) =>
+                      setData({
+                        ...data,
+                        settings: {
+                          ...s,
+                          [k]:
+                            k === 'smtp_port'
+                              ? Number(e.target.value)
+                              : e.target.value,
+                        },
+                      })
+                    }
+                  />
+                </Field>
+              ))}
+            </div>
+            <p className="muted">
+              先保存设置，再发送测试邮件到当前管理员邮箱。确认收到后启用验证码邮件。
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => act('mail-test', {})}
+            >
+              发送测试邮件
+            </Button>
           </div>
           <div className="setting-toggle">
             <div>

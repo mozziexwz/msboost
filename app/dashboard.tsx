@@ -406,7 +406,7 @@ export default function Dashboard() {
           <Notice text={error} />
           {data && !settings.auth_ready && (
             <p className="setup-hint">
-              站点正在配置邮件与验证服务，注册暂未开放。
+              邮件或注册服务尚未启用，注册暂未开放。已有账号可尝试登录。
             </p>
           )}
           <div className="login-policy">

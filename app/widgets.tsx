@@ -206,7 +206,10 @@ export function AuthDialog({
   onSuccess: () => void;
   settings: any;
 }) {
-  const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login'),
+  const [mode, setMode] = useState<'login' | 'register' | 'reset' | 'setup'>(
+      'login',
+    ),
+    [setupToken, setSetupToken] = useState(''),
     [email, setEmail] = useState(''),
     [password, setPassword] = useState(''),
     [code, setCode] = useState(''),
@@ -260,7 +263,7 @@ export function AuthDialog({
   }
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (settings.turnstile_enabled && action !== mode) {
+    if (mode !== 'setup' && settings.turnstile_enabled && action !== mode) {
       setAction(mode);
       setToken('');
       setError('请完成下方验证后继续。');
@@ -276,8 +279,10 @@ export function AuthDialog({
         invite,
         agreed,
         token,
+        ...(mode === 'setup' ? { setup_token: setupToken } : {}),
       });
       setPassword('');
+      setSetupToken('');
       if (mode === 'reset') {
         switchMode('login');
         setSuccess('密码已修改，请登录。');
@@ -299,6 +304,7 @@ export function AuthDialog({
       onOpenChange={(v) => {
         if (!v) {
           setPassword('');
+          setSetupToken('');
           onClose();
         }
       }}
@@ -306,11 +312,13 @@ export function AuthDialog({
       <DialogContent className="auth-dialog">
         <DialogHeader>
           <DialogTitle>
-            {mode === 'login'
-              ? '欢迎回到 MSBOOST'
-              : mode === 'register'
-                ? '创建你的账号'
-                : '重置登录密码'}
+            {mode === 'setup'
+              ? '初始化管理员'
+              : mode === 'login'
+                ? '欢迎回到 MSBOOST'
+                : mode === 'register'
+                  ? '创建你的账号'
+                  : '重置登录密码'}
           </DialogTitle>
           <DialogDescription>
             仅支持 QQ 邮箱
@@ -346,7 +354,21 @@ export function AuthDialog({
               required
             />
           </Field>
-          {mode !== 'login' && (
+          {mode === 'setup' && (
+            <Field
+              label="一次性初始化密钥"
+              hint="由部署配置提供；创建管理员后此入口自动停用"
+            >
+              <Input
+                type="password"
+                autoComplete="off"
+                value={setupToken}
+                onChange={(e) => setSetupToken(e.target.value)}
+                required
+              />
+            </Field>
+          )}
+          {['register', 'reset'].includes(mode) && (
             <>
               <Field label="邮箱验证码">
                 <div className="inline-fields">
@@ -365,7 +387,9 @@ export function AuthDialog({
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={busy || count > 0 || !email}
+                    disabled={
+                      busy || count > 0 || !email || !settings.mail_ready
+                    }
                     onClick={send}
                   >
                     {count ? `${count}s` : '发送验证码'}
@@ -392,7 +416,7 @@ export function AuthDialog({
               我已阅读并同意服务协议及隐私政策
             </label>
           )}
-          {settings.turnstile_enabled && (
+          {mode !== 'setup' && settings.turnstile_enabled && (
             <Captcha
               siteKey={settings.turnstile_site_key || ''}
               action={action}
@@ -400,22 +424,38 @@ export function AuthDialog({
               reset={reset}
             />
           )}
+          {['register', 'reset'].includes(mode) && !settings.mail_ready && (
+            <Notice text="邮件发送尚未启用，暂时无法注册或找回密码。已有账号请返回登录。" />
+          )}
           <Notice text={error} />
           <Notice text={success} ok />
           <Button
             className="w-full"
             type="submit"
-            disabled={busy || (settings.turnstile_enabled && !token)}
+            disabled={
+              busy ||
+              (['register', 'reset'].includes(mode) && !settings.mail_ready) ||
+              (mode !== 'setup' && settings.turnstile_enabled && !token)
+            }
           >
             {busy ? <LoaderCircle className="animate-spin" size={16} /> : null}
-            {mode === 'login'
-              ? '登录'
-              : mode === 'register'
-                ? '验证并注册'
-                : '修改密码'}
+            {mode === 'setup'
+              ? '创建管理员并登录'
+              : mode === 'login'
+                ? '登录'
+                : mode === 'register'
+                  ? '验证并注册'
+                  : '修改密码'}
           </Button>
         </form>
         <div className="auth-links">
+          {settings.setup_available && (
+            <button
+              onClick={() => switchMode(mode === 'setup' ? 'login' : 'setup')}
+            >
+              {mode === 'setup' ? '返回登录' : '首次管理员初始化'}
+            </button>
+          )}
           <button
             onClick={() =>
               switchMode(mode === 'register' ? 'login' : 'register')

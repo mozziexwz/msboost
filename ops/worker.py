@@ -224,16 +224,35 @@ def run_job(data):
 
 def send_mail(data):
     email, code = data.get('email', ''), data.get('code', '')
-    if not re.fullmatch(r'[a-z0-9][a-z0-9._+\-]*@qq\.com', email) or not re.fullmatch(r'\d{6}', code):
+    test_mail = data.get('purpose') == 'test'
+    if not re.fullmatch(r'[a-z0-9][a-z0-9._+\-]*@qq\.com', email) or (not test_mail and not re.fullmatch(r'\d{6}', code)):
         raise ValueError('无效的验证码邮件')
+    config = data.get('smtp')
+    if config is None:
+        config = dict(host=os.environ.get('SMTP_HOST', 'smtp.qq.com'), port=int(os.environ.get('SMTP_PORT', '465')),
+                      username=os.environ.get('SMTP_USER', ''), password=os.environ.get('SMTP_PASSWORD', ''),
+                      **{'from': os.environ.get('SMTP_FROM', '')})
+    if not isinstance(config, dict):
+        raise ValueError('SMTP 配置无效')
+    host, port = config.get('host', ''), config.get('port')
+    if not isinstance(host, str) or not re.fullmatch(r'[a-zA-Z0-9.-]{1,253}', host) or port != 465:
+        raise ValueError('SMTP 需要有效主机和 465 SSL/TLS 端口')
+    for field in ('username', 'from'):
+        if not isinstance(config.get(field), str) or not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+', config[field]):
+            raise ValueError('SMTP 邮箱格式无效')
+    if not isinstance(config.get('password'), str) or not 1 <= len(config['password']) <= 2048:
+        raise ValueError('SMTP 授权码未配置')
+    addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    if not addresses or not all(public_ip(item[4][0]) for item in addresses):
+        raise ValueError('SMTP 主机必须解析到公网地址')
     message = EmailMessage()
-    message['From'] = os.environ['SMTP_FROM']
+    message['From'] = config['from']
     message['To'] = email
-    message['Subject'] = 'MSBOOST 邮箱验证码'
-    message.set_content(f'你的 MSBOOST 验证码是：{code}\n\n10 分钟内有效。若非本人操作，请忽略此邮件。\nmsboost.de')
-    with smtplib.SMTP_SSL(os.environ.get('SMTP_HOST', 'smtp.qq.com'), int(os.environ.get('SMTP_PORT', '465')),
+    message['Subject'] = 'MSBOOST 邮件配置测试' if test_mail else 'MSBOOST 邮箱验证码'
+    message.set_content('这是一封由 MSBOOST 管理员手动发送的测试邮件。邮件发送配置正常。' if test_mail else f'你的 MSBOOST 验证码是：{code}\n\n10 分钟内有效。若非本人操作，请忽略此邮件。\nmsboost.de')
+    with smtplib.SMTP_SSL(host, port,
                           context=ssl.create_default_context(), timeout=15) as smtp:
-        smtp.login(os.environ['SMTP_USER'], os.environ['SMTP_PASSWORD'])
+        smtp.login(config['username'], config['password'])
         smtp.send_message(message)
 
 class Handler(BaseHTTPRequestHandler):
