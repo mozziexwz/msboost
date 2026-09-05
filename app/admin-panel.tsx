@@ -138,6 +138,25 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
             <h3>注册与登录</h3>
             <div className="setting-toggle">
               <div>
+                <b>注册需要邮箱验证码</b>
+                <p>
+                  关闭后，QQ
+                  邮箱与密码即可注册；邀请码仍按独立开关检查。找回密码始终需要邮箱验证码。
+                </p>
+              </div>
+              <Switch
+                checked={s.register_email_verification}
+                aria-label="注册需要邮箱验证码"
+                onCheckedChange={(v) =>
+                  setData({
+                    ...data,
+                    settings: { ...s, register_email_verification: v },
+                  })
+                }
+              />
+            </div>
+            <div className="setting-toggle">
+              <div>
                 <b>邀请制注册</b>
                 <p>开启时，新用户须提供有效邀请码</p>
               </div>
@@ -305,7 +324,9 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
             <div className="setting-toggle">
               <div>
                 <b>启用验证码邮件</b>
-                <p>可稍后配置；关闭时暂停注册和找回密码，已有账号仍可登录。</p>
+                <p>
+                  关闭时无法发送验证码；需要邮箱验证的注册及找回密码暂停，已有账号仍可登录。
+                </p>
               </div>
               <Switch
                 checked={s.mail_enabled}

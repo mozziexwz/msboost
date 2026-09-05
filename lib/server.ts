@@ -126,6 +126,7 @@ export async function decrypt(value: string) {
 }
 export const defaultSettings: Record<string, any> = {
   invite_required: true,
+  register_email_verification: true,
   turnstile_enabled: false,
   mail_enabled: false,
   smtp_host: 'smtp.qq.com',
@@ -166,7 +167,11 @@ export function authReadiness(s: Record<string, any>) {
     s.smtp_from &&
     s.smtp_password,
   );
-  return { login_ready, mail_ready, auth_ready: login_ready && mail_ready };
+  return {
+    login_ready,
+    mail_ready,
+    auth_ready: login_ready && (!s.register_email_verification || mail_ready),
+  };
 }
 export function smtpPayload(s: Record<string, any>) {
   return {

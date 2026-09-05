@@ -4,9 +4,16 @@ import { env, sqlite, objects } from './bindings.ts';
 import { id, now, DAY } from '../lib/core.ts';
 import { createOrder, settleOrder } from '../lib/commerce.ts';
 import { saveConfig, getConfig, purgeExpired } from '../lib/configs.ts';
-import { encrypt, stmt, one, hash, turnstile } from '../lib/server.ts';
+import { encrypt, stmt, one, hash, turnstile, hmac } from '../lib/server.ts';
 import { createBackup, restoreBackup } from '../lib/backup.ts';
-import { setupAdmin, setupAvailable, login, sendCode } from '../lib/auth.ts';
+import {
+  setupAdmin,
+  setupAvailable,
+  login,
+  sendCode,
+  register,
+  resetPassword,
+} from '../lib/auth.ts';
 import { adminAction, adminSnapshot } from '../lib/admin.ts';
 import { GET, POST } from '../app/api/[...path]/route.ts';
 const req = new Request('https://msboost.de/api/orders', {
@@ -83,6 +90,81 @@ const source = JSON.stringify({
   socks5Port: 1080,
 });
 test('payment, expiry, storage and access integration', async (t) => {
+  await t.test(
+    'registration verification switch stays independent from invitations, QQ restriction and owner setup',
+    async () => {
+      fixture();
+      await adminAction(req, { ...user, role: 'admin' }, 'settings', {
+        register_email_verification: false,
+      });
+      const account = {
+        email: 'newcustomer@qq.com',
+        password: 'customer-password-test',
+        agreed: true,
+      };
+      await assert.rejects(() => register(req, account), /邀请码/);
+      await adminAction(req, { ...user, role: 'admin' }, 'settings', {
+        invite_required: false,
+      });
+      await assert.rejects(
+        () => register(req, { ...account, email: env.OWNER_EMAIL }),
+        /管理员邮箱已保留/,
+      );
+      await assert.rejects(() =>
+        register(req, { ...account, email: 'other@gmail.com' }),
+      );
+      assert.ok((await register(req, account)).cookie);
+      assert.equal(
+        (await one('SELECT role FROM users WHERE email=?', account.email)).role,
+        'customer',
+      );
+      await assert.rejects(
+        () =>
+          resetPassword(req, { ...account, password: 'replacement-password' }),
+        /验证码/,
+      );
+      const bootstrap = (await (
+        await GET(new Request('https://msboost.de/api/bootstrap'))
+      ).json()) as any;
+      assert.equal(bootstrap.settings.mail_ready, false);
+      assert.equal(bootstrap.settings.auth_ready, true);
+    },
+  );
+  await t.test(
+    'enabled registration verification rejects missing codes and accepts a valid one exactly once',
+    async () => {
+      fixture();
+      await adminAction(req, { ...user, role: 'admin' }, 'settings', {
+        invite_required: false,
+        register_email_verification: true,
+      });
+      const account = {
+        email: 'verifiedcustomer@qq.com',
+        password: 'customer-password-test',
+        agreed: true,
+      };
+      await assert.rejects(() => register(req, account), /验证码/);
+      const digest = await hmac('code:' + account.email + ':register:123456');
+      await stmt(
+        'INSERT INTO email_codes(email,digest,purpose,expires_at,sent_at) VALUES(?,?,?,?,?)',
+        account.email,
+        digest,
+        'register',
+        now() + 600,
+        now(),
+      ).run();
+      assert.ok((await register(req, { ...account, code: '123456' })).cookie);
+      assert.equal(
+        (
+          await one(
+            'SELECT consumed FROM email_codes WHERE email=?',
+            account.email,
+          )
+        ).consumed,
+        1,
+      );
+    },
+  );
   await t.test(
     'owner setup works before SMTP and is single use; existing owner login remains available',
     async () => {

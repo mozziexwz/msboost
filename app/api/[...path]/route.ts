@@ -141,6 +141,7 @@ async function handle(req: Request) {
           user: null,
           settings: {
             invite_required: s.invite_required,
+            register_email_verification: s.register_email_verification,
             turnstile_enabled: s.turnstile_enabled,
             turnstile_site_key: s.turnstile_site_key,
             ...authReadiness(s),
@@ -172,6 +173,7 @@ async function handle(req: Request) {
         user: u,
         settings: {
           invite_required: s.invite_required,
+          register_email_verification: s.register_email_verification,
           turnstile_enabled: s.turnstile_enabled,
           turnstile_site_key: s.turnstile_site_key,
           epay_alipay: s.epay_alipay,

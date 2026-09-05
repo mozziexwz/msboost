@@ -222,6 +222,9 @@ export function AuthDialog({
     [error, setError] = useState(''),
     [success, setSuccess] = useState(''),
     [count, setCount] = useState(0);
+  const needsEmailCode =
+    mode === 'reset' ||
+    (mode === 'register' && settings.register_email_verification !== false);
   useEffect(() => {
     if (!count) return;
     const t = setTimeout(() => setCount(count - 1), 1000);
@@ -370,32 +373,34 @@ export function AuthDialog({
           )}
           {['register', 'reset'].includes(mode) && (
             <>
-              <Field label="邮箱验证码">
-                <div className="inline-fields">
-                  <InputOTP
-                    value={code}
-                    onChange={setCode}
-                    maxLength={6}
-                    pattern="^[0-9]*$"
-                  >
-                    <InputOTPGroup>
-                      {Array.from({ length: 6 }, (_, i) => (
-                        <InputOTPSlot key={i} index={i} />
-                      ))}
-                    </InputOTPGroup>
-                  </InputOTP>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={
-                      busy || count > 0 || !email || !settings.mail_ready
-                    }
-                    onClick={send}
-                  >
-                    {count ? `${count}s` : '发送验证码'}
-                  </Button>
-                </div>
-              </Field>
+              {needsEmailCode && (
+                <Field label="邮箱验证码">
+                  <div className="inline-fields">
+                    <InputOTP
+                      value={code}
+                      onChange={setCode}
+                      maxLength={6}
+                      pattern="^[0-9]*$"
+                    >
+                      <InputOTPGroup>
+                        {Array.from({ length: 6 }, (_, i) => (
+                          <InputOTPSlot key={i} index={i} />
+                        ))}
+                      </InputOTPGroup>
+                    </InputOTP>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={
+                        busy || count > 0 || !email || !settings.mail_ready
+                      }
+                      onClick={send}
+                    >
+                      {count ? `${count}s` : '发送验证码'}
+                    </Button>
+                  </div>
+                </Field>
+              )}
               {mode === 'register' && settings.invite_required && (
                 <Field label="邀请码">
                   <Input
@@ -424,7 +429,7 @@ export function AuthDialog({
               reset={reset}
             />
           )}
-          {['register', 'reset'].includes(mode) && !settings.mail_ready && (
+          {needsEmailCode && !settings.mail_ready && (
             <Notice text="邮件发送尚未启用，暂时无法注册或找回密码。已有账号请返回登录。" />
           )}
           <Notice text={error} />
@@ -434,7 +439,7 @@ export function AuthDialog({
             type="submit"
             disabled={
               busy ||
-              (['register', 'reset'].includes(mode) && !settings.mail_ready) ||
+              (needsEmailCode && !settings.mail_ready) ||
               (mode !== 'setup' && settings.turnstile_enabled && !token)
             }
           >
@@ -444,7 +449,9 @@ export function AuthDialog({
               : mode === 'login'
                 ? '登录'
                 : mode === 'register'
-                  ? '验证并注册'
+                  ? needsEmailCode
+                    ? '验证并注册'
+                    : '注册'
                   : '修改密码'}
           </Button>
         </form>
@@ -461,7 +468,11 @@ export function AuthDialog({
               switchMode(mode === 'register' ? 'login' : 'register')
             }
           >
-            {mode === 'register' ? '已有账号，去登录' : '邀请码注册'}
+            {mode === 'register'
+              ? '已有账号，去登录'
+              : settings.invite_required
+                ? '邀请码注册'
+                : '注册账号'}
           </button>
           <button
             onClick={() => switchMode(mode === 'reset' ? 'login' : 'reset')}

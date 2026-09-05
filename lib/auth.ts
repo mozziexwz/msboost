@@ -124,8 +124,11 @@ export async function register(req: Request, b: any) {
   const s = await settings();
   await throttle('register:' + clientIp(req), 10, 3600);
   await turnstile(req, b.token, 'register', s);
-  const email = normalizeEmail(b.email),
-    digest = await verifyCode(email, 'register', b.code);
+  const email = normalizeEmail(b.email);
+  const emailRequired = s.register_email_verification !== false;
+  const digest = emailRequired
+    ? await verifyCode(email, 'register', b.code)
+    : '';
   assert(
     !(await one('SELECT id FROM users WHERE email=?', email)),
     '该邮箱已注册',
@@ -139,6 +142,11 @@ export async function register(req: Request, b: any) {
       .trim()
       .toLowerCase();
   const required = s.invite_required && !owner;
+  assert(
+    !owner || emailRequired,
+    '管理员邮箱已保留，请使用首次管理员初始化入口',
+    403,
+  );
   const invited = await one(
     'SELECT * FROM invitations WHERE code_hash=? AND enabled=1 AND uses<max_uses AND expires_at>?',
     invitation,
@@ -149,12 +157,13 @@ export async function register(req: Request, b: any) {
     pw = await passwordHash(b.password);
   await db().batch([
     stmt(
-      'INSERT INTO users(id,email,password,role,created_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM email_codes WHERE email=? AND digest=? AND consumed=0 AND expires_at>? AND attempts<=5) AND (?=0 OR EXISTS(SELECT 1 FROM invitations WHERE code_hash=? AND enabled=1 AND uses<max_uses AND expires_at>?))',
+      'INSERT INTO users(id,email,password,role,created_at) SELECT ?,?,?,?,? WHERE (?=0 OR EXISTS(SELECT 1 FROM email_codes WHERE email=? AND digest=? AND consumed=0 AND expires_at>? AND attempts<=5)) AND (?=0 OR EXISTS(SELECT 1 FROM invitations WHERE code_hash=? AND enabled=1 AND uses<max_uses AND expires_at>?))',
       uid,
       email,
       pw,
       owner ? 'admin' : 'customer',
       now(),
+      emailRequired ? 1 : 0,
       email,
       digest,
       now(),

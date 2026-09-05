@@ -391,8 +391,9 @@ export default function Dashboard() {
           <p className="eyebrow">MSBOOST.DE</p>
           <h1>登录你的游戏线路控制台</h1>
           <p className="muted">
-            {settings.invite_required
-              ? '邀请制开放 · QQ 邮箱验证注册'
+            {settings.invite_required ? '邀请制开放 · ' : ''}
+            {settings.register_email_verification === false
+              ? 'QQ 邮箱注册'
               : 'QQ 邮箱验证注册'}
           </p>
           <Button className="login-cta" onClick={() => setAuth(true)}>

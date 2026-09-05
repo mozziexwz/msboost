@@ -154,6 +154,7 @@ export async function adminAction(
       if (
         [
           'invite_required',
+          'register_email_verification',
           'turnstile_enabled',
           'mail_enabled',
           'epay_alipay',
