@@ -1,0 +1,25 @@
+[Unit]
+Description=MSBOOST one-shot VPS worker and SMTP bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=msboostworker
+Group=msboostworker
+EnvironmentFile=/etc/msboost-worker/worker.env
+ExecStart=/opt/msboost-worker/venv/bin/python /opt/msboost-worker/worker.py
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemorySwapMax=0
+LimitCORE=0
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
