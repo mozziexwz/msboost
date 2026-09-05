@@ -35,7 +35,7 @@ export const objects = new Map<string, string>();
 export const env: any = {
   APP_ENCRYPTION_KEY: 'a'.repeat(64),
   PUBLIC_ORIGIN: 'https://msboost.de',
-  OWNER_EMAIL: 'admin@qq.com',
+  OWNER_EMAIL: 'admin@gmail.com',
   DB: {
     prepare: (sql: string) => new Prepared(sql),
     batch: async (statements: Prepared[]) => {

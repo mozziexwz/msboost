@@ -18,6 +18,17 @@ import {
   turnstile,
   workerFetch,
 } from './server';
+function normalizeAuthEmail(value: unknown) {
+  const email = String(value ?? '').trim().toLowerCase();
+  const owner = String(env.OWNER_EMAIL ?? '').trim().toLowerCase();
+  if (
+    email === owner &&
+    email.length <= 254 &&
+    /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)
+  )
+    return email;
+  return normalizeEmail(value);
+}
 export async function setupAvailable() {
   return Boolean(
     env.APP_ENCRYPTION_KEY &&
@@ -36,10 +47,10 @@ export async function setupAdmin(req: Request, b: any) {
     '初始化密钥无效',
     403,
   );
-  const email = normalizeEmail(b.email);
+  const email = normalizeAuthEmail(b.email);
   assert(
     email === String(env.OWNER_EMAIL).trim().toLowerCase(),
-    '请输入部署时指定的管理员 QQ 邮箱',
+    '请输入部署时指定的管理员邮箱',
     403,
   );
   const uid = id(),
@@ -61,7 +72,7 @@ export async function setupAdmin(req: Request, b: any) {
 }
 export async function sendCode(req: Request, b: any) {
   const s = await settings(),
-    email = normalizeEmail(b.email);
+    email = normalizeAuthEmail(b.email);
   assert(['register', 'reset'].includes(b.purpose), '无效的验证码用途');
   assert(
     authReadiness(s).mail_ready,
@@ -207,7 +218,7 @@ async function startSession(req: Request, uid: string) {
 export async function login(req: Request, b: any) {
   const s = await settings(),
     ip = clientIp(req),
-    email = normalizeEmail(b.email),
+    email = normalizeAuthEmail(b.email),
     t = now();
   const blocked = await one(
     'SELECT blocked_until FROM rate_limits WHERE key=?',
@@ -254,7 +265,7 @@ export async function resetPassword(req: Request, b: any) {
   const s = await settings();
   await throttle('reset:' + clientIp(req), 10, 3600);
   await turnstile(req, b.token, 'reset', s);
-  const email = normalizeEmail(b.email),
+  const email = normalizeAuthEmail(b.email),
     digest = await verifyCode(email, 'reset', b.code),
     pw = await passwordHash(b.password),
     u = await one('SELECT id FROM users WHERE email=?', email);

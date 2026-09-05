@@ -225,7 +225,7 @@ def run_job(data):
 def send_mail(data):
     email, code = data.get('email', ''), data.get('code', '')
     test_mail = data.get('purpose') == 'test'
-    if not re.fullmatch(r'[a-z0-9][a-z0-9._+\-]*@qq\.com', email) or (not test_mail and not re.fullmatch(r'\d{6}', code)):
+    if not isinstance(email, str) or len(email) > 254 or not re.fullmatch(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+', email) or (not test_mail and not re.fullmatch(r'\d{6}', code)):
         raise ValueError('无效的验证码邮件')
     config = data.get('smtp')
     if config is None:

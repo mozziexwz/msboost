@@ -324,20 +324,24 @@ export function AuthDialog({
                   : '重置登录密码'}
           </DialogTitle>
           <DialogDescription>
-            仅支持 QQ 邮箱
+            {mode === 'register'
+              ? '客户注册仅支持 QQ 邮箱'
+              : '客户使用 QQ 邮箱；管理员可使用指定邮箱'}
             {mode === 'register' && settings.invite_required
               ? ' · 当前需邀请码'
               : ''}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="form-stack">
-          <Field label="QQ 邮箱">
+          <Field label={mode === 'register' ? 'QQ 邮箱' : '登录邮箱'}>
             <Input
               type="email"
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="yourname@qq.com"
+              placeholder={
+                mode === 'register' ? 'yourname@qq.com' : '请输入登录邮箱'
+              }
               required
             />
           </Field>

@@ -108,7 +108,7 @@ test('payment, expiry, storage and access integration', async (t) => {
       });
       await assert.rejects(
         () => register(req, { ...account, email: env.OWNER_EMAIL }),
-        /管理员邮箱已保留/,
+        /仅支持 @qq.com 邮箱/,
       );
       await assert.rejects(() =>
         register(req, { ...account, email: 'other@gmail.com' }),
@@ -187,6 +187,9 @@ test('payment, expiry, storage and access integration', async (t) => {
         assert.equal(await setupAvailable(), false);
         await assert.rejects(() => setupAdmin(req, credentials));
         assert.ok((await login(req, credentials)).cookie);
+        await assert.rejects(() =>
+          login(req, { ...credentials, email: 'customer@gmail.com' }),
+        );
         await assert.rejects(
           () => sendCode(req, { email: env.OWNER_EMAIL, purpose: 'register' }),
           /邮件发送尚未启用/,
