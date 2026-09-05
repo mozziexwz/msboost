@@ -4,7 +4,8 @@ import { env, sqlite, objects } from './bindings.ts';
 import { id, now, DAY } from '../lib/core.ts';
 import { createOrder, settleOrder } from '../lib/commerce.ts';
 import { saveConfig, getConfig, purgeExpired } from '../lib/configs.ts';
-import { encrypt, stmt, one } from '../lib/server.ts';
+import { encrypt, stmt, one, hash, turnstile } from '../lib/server.ts';
+import { createBackup, restoreBackup } from '../lib/backup.ts';
 import { GET, POST } from '../app/api/[...path]/route.ts';
 const req = new Request('https://msboost.de/api/orders', {
   method: 'POST',
@@ -80,6 +81,33 @@ const source = JSON.stringify({
   socks5Port: 1080,
 });
 test('payment, expiry, storage and access integration', async (t) => {
+  await t.test(
+    'Turnstile can be disabled without an external verification call',
+    async () => {
+      await turnstile(req, '', 'login', { turnstile_enabled: false });
+    },
+  );
+  await t.test(
+    'backup restores settings, users, forwarding and finance',
+    async () => {
+      fixture();
+      await stmt("UPDATE users SET role='admin' WHERE id=?", user.id).run();
+      const admin = { ...user, role: 'admin' };
+      await createOrder(req, admin, input);
+      const backup = await createBackup(req, admin);
+      await stmt("UPDATE plans SET name='changed' WHERE id='trial'").run();
+      await restoreBackup(req, admin, backup);
+      assert.equal(
+        (await one("SELECT name FROM plans WHERE id='trial'"))!.name,
+        '体验',
+      );
+      assert.equal((await one('SELECT COUNT(*) n FROM orders'))!.n, 1);
+      assert.equal(
+        (await one('SELECT role FROM users WHERE id=?', user.id))!.role,
+        'admin',
+      );
+    },
+  );
   await t.test(
     'failed object deletion remains queued and retries without restoring downloads',
     async () => {
@@ -243,6 +271,46 @@ test('payment, expiry, storage and access integration', async (t) => {
         center.profiles[0].servers[0].domainName,
         'relay.msboost.de',
       );
+    },
+  );
+  await t.test(
+    'required-front line blocks direct use and pins center admission to the front IP',
+    async () => {
+      fixture();
+      const token = 'a'.repeat(64);
+      await stmt(
+        'UPDATE lines SET requires_front=1,token_hash=? WHERE id=?',
+        await hash(token),
+        line,
+      ).run();
+      await createOrder(req, user, input);
+      const r = await one('SELECT id FROM relays');
+      await saveConfig(user, r.id, source);
+      await assert.rejects(() => getConfig(user, r.id));
+      const sync = () =>
+        POST(
+          new Request('https://msboost.de/api/node/sync', {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: '{}',
+          }),
+        );
+      assert.equal(((await (await sync()).json()) as any).relays.length, 0);
+      await stmt(
+        'INSERT INTO fronts(relay_id,host,port,job_id,created_at) VALUES(?,?,?,?,?)',
+        r.id,
+        '9.9.9.9',
+        35000,
+        'job',
+        now(),
+      ).run();
+      const desired = ((await (await sync()).json()) as any).relays[0];
+      assert.equal(desired.source_ip, '9.9.9.9');
+      const config = (await (await getConfig(user, r.id, true)).json()) as any;
+      assert.equal(config.profiles[0].servers[0].ipAddress, '9.9.9.9');
     },
   );
   await t.test(

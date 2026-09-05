@@ -30,6 +30,7 @@ import { adminAction, adminSnapshot } from '@/lib/admin';
 import { initialArticles } from '@/lib/content';
 import { getConfig, purgeExpired, saveConfig } from '@/lib/configs';
 import { equal } from '@/lib/core';
+import { createBackup, restoreBackup } from '@/lib/backup';
 export const dynamic = 'force-dynamic';
 async function handle(req: Request) {
   const path = new URL(req.url).pathname.replace(/^\/api\//, ''),
@@ -108,7 +109,7 @@ async function handle(req: Request) {
             ).run();
       const desired = line.enabled
         ? await rows(
-            'SELECT id,target_ip,target_port,protocol,listen_port,expires_at,speed_mbps,revision FROM relays WHERE line_id=? AND suspended=0 AND expires_at>? AND user_id IN (SELECT id FROM users WHERE disabled=0)',
+            'SELECT r.id,r.target_ip,r.target_port,r.protocol,r.listen_port,r.expires_at,r.speed_mbps,r.revision,CASE WHEN l.requires_front=1 THEN (SELECT host FROM fronts f WHERE f.relay_id=r.id) ELSE NULL END AS source_ip FROM relays r JOIN lines l ON l.id=r.line_id WHERE r.line_id=? AND r.suspended=0 AND r.expires_at>? AND r.user_id IN (SELECT id FROM users WHERE disabled=0) AND (l.requires_front=0 OR EXISTS(SELECT 1 FROM fronts f WHERE f.relay_id=r.id))',
             line.id,
             t,
           )
@@ -132,10 +133,12 @@ async function handle(req: Request) {
           user: null,
           settings: {
             invite_required: s.invite_required,
+            turnstile_enabled: s.turnstile_enabled,
             turnstile_site_key: s.turnstile_site_key,
             auth_ready: Boolean(
               env.APP_ENCRYPTION_KEY &&
-              s.turnstile_secret &&
+              (!s.turnstile_enabled ||
+                (s.turnstile_secret && s.turnstile_site_key)) &&
               s.worker_url &&
               s.worker_token,
             ),
@@ -149,7 +152,7 @@ async function handle(req: Request) {
         settings(),
         currentUser(req),
         rows(
-          'SELECT id,name,region,description,host,enabled,heartbeat_at,probe_label,rtt_ms,loss_pct FROM lines ORDER BY created_at',
+          'SELECT id,name,region,description,host,enabled,requires_front,heartbeat_at,probe_label,rtt_ms,loss_pct FROM lines ORDER BY created_at',
         ),
         rows('SELECT * FROM plans WHERE enabled=1 ORDER BY sort'),
         rows(
@@ -158,7 +161,7 @@ async function handle(req: Request) {
       ]);
       const mine = u
         ? await rows(
-            'SELECT r.*,l.name AS line_name,l.host AS relay_host,l.heartbeat_at,EXISTS(SELECT 1 FROM config_files c WHERE c.relay_id=r.id) AS config_saved,(SELECT host FROM fronts f WHERE f.relay_id=r.id) AS front_host,(SELECT port FROM fronts f WHERE f.relay_id=r.id) AS front_port FROM relays r JOIN lines l ON l.id=r.line_id WHERE r.user_id=? ORDER BY r.created_at DESC',
+            'SELECT r.*,l.name AS line_name,l.host AS relay_host,l.heartbeat_at,l.requires_front,EXISTS(SELECT 1 FROM config_files c WHERE c.relay_id=r.id) AS config_saved,(SELECT host FROM fronts f WHERE f.relay_id=r.id) AS front_host,(SELECT port FROM fronts f WHERE f.relay_id=r.id) AS front_port FROM relays r JOIN lines l ON l.id=r.line_id WHERE r.user_id=? ORDER BY r.created_at DESC',
             u.id,
           )
         : [];
@@ -166,6 +169,7 @@ async function handle(req: Request) {
         user: u,
         settings: {
           invite_required: s.invite_required,
+          turnstile_enabled: s.turnstile_enabled,
           turnstile_site_key: s.turnstile_site_key,
           epay_alipay: s.epay_alipay,
           epay_wxpay: s.epay_wxpay,
@@ -174,7 +178,8 @@ async function handle(req: Request) {
           worker_ready: Boolean(s.worker_url && s.worker_token),
           auth_ready: Boolean(
             env.APP_ENCRYPTION_KEY &&
-            s.turnstile_secret &&
+            (!s.turnstile_enabled ||
+              (s.turnstile_secret && s.turnstile_site_key)) &&
             s.worker_url &&
             s.worker_token,
           ),
@@ -204,7 +209,13 @@ async function handle(req: Request) {
       });
     }
     if (method === 'POST') sameOrigin(req);
-    const b = method === 'POST' ? await jsonBody(req) : {};
+    const b =
+      method === 'POST'
+        ? await jsonBody(
+            req,
+            path === 'admin/backup/restore' ? 8 * 1024 * 1024 : 262144,
+          )
+        : {};
     if (method === 'POST' && path === 'auth/code')
       return json(await sendCode(req, b));
     if (method === 'POST' && ['auth/login', 'auth/register'].includes(path)) {
@@ -228,6 +239,13 @@ async function handle(req: Request) {
     }
     if (path.startsWith('admin')) {
       const u = await requireUser(req, 'admin');
+      if (method === 'GET' && path === 'admin/backup')
+        return json(await createBackup(req, u));
+      if (method === 'POST' && path === 'admin/backup/restore')
+        return json(await restoreBackup(req, u, b), 200, {
+          'Set-Cookie':
+            'msboost_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0',
+        });
       if (method === 'GET' && path === 'admin')
         return json(await adminSnapshot());
       if (method === 'POST')
@@ -468,14 +486,25 @@ async function handle(req: Request) {
         result.state === 'completed' &&
         result.front_port
       ) {
-        await stmt(
-          'INSERT INTO fronts(relay_id,host,port,job_id,created_at) VALUES(?,?,?,?,?) ON CONFLICT(relay_id) DO UPDATE SET host=excluded.host,port=excluded.port,job_id=excluded.job_id,created_at=excluded.created_at',
+        const oldFront = await one(
+          'SELECT job_id FROM fronts WHERE relay_id=?',
           job.relay_id,
-          job.ip,
-          result.front_port,
-          job.id,
-          now(),
-        ).run();
+        );
+        if (oldFront?.job_id !== job.id)
+          await db().batch([
+            stmt(
+              'INSERT INTO fronts(relay_id,host,port,job_id,created_at) VALUES(?,?,?,?,?) ON CONFLICT(relay_id) DO UPDATE SET host=excluded.host,port=excluded.port,job_id=excluded.job_id,created_at=excluded.created_at',
+              job.relay_id,
+              job.ip,
+              result.front_port,
+              job.id,
+              now(),
+            ),
+            stmt(
+              'UPDATE relays SET revision=revision+1 WHERE id=?',
+              job.relay_id,
+            ),
+          ]);
       }
       return json(result);
     }

@@ -233,7 +233,7 @@ export function AuthDialog({
     setSuccess('');
   }
   async function send() {
-    if (action !== 'email') {
+    if (settings.turnstile_enabled && action !== 'email') {
       setAction('email');
       setToken('');
       setError('请完成下方邮箱发送验证，再次点击发送验证码。');
@@ -260,7 +260,7 @@ export function AuthDialog({
   }
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (action !== mode) {
+    if (settings.turnstile_enabled && action !== mode) {
       setAction(mode);
       setToken('');
       setError('请完成下方验证后继续。');
@@ -392,15 +392,21 @@ export function AuthDialog({
               我已阅读并同意服务协议及隐私政策
             </label>
           )}
-          <Captcha
-            siteKey={settings.turnstile_site_key || ''}
-            action={action}
-            onToken={setToken}
-            reset={reset}
-          />
+          {settings.turnstile_enabled && (
+            <Captcha
+              siteKey={settings.turnstile_site_key || ''}
+              action={action}
+              onToken={setToken}
+              reset={reset}
+            />
+          )}
           <Notice text={error} />
           <Notice text={success} ok />
-          <Button className="w-full" type="submit" disabled={busy || !token}>
+          <Button
+            className="w-full"
+            type="submit"
+            disabled={busy || (settings.turnstile_enabled && !token)}
+          >
             {busy ? <LoaderCircle className="animate-spin" size={16} /> : null}
             {mode === 'login'
               ? '登录'

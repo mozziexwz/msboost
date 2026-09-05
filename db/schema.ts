@@ -64,6 +64,7 @@ export const lines = sqliteTable('lines', {
   port_start: integer().notNull(),
   port_end: integer().notNull(),
   enabled: integer().notNull().default(0),
+  requires_front: integer().notNull().default(0),
   token_hash: text().notNull(),
   heartbeat_at: integer(),
   probe_label: text().notNull().default('线路服务器 → 配置的探测目标'),

@@ -1,0 +1,1 @@
+ALTER TABLE `lines` ADD `requires_front` integer DEFAULT 0 NOT NULL;

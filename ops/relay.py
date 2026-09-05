@@ -33,18 +33,25 @@ def gost_config(rule):
             raise ValueError('invalid port')
     if rule['protocol'] not in ('TCP', 'UDP') or not 1 <= rule['speed_mbps'] <= 10000:
         raise ValueError('invalid protocol or speed')
+    source_ip = rule.get('source_ip')
+    if source_ip is not None and not valid_ip(source_ip):
+        raise ValueError('invalid source admission')
     protocol = rule['protocol'].lower()
     rate = int(rule['speed_mbps'] * 1000000 / 8)
     listener = {'type': protocol}
     if protocol == 'udp':
         listener['metadata'] = {'keepAlive': True, 'ttl': '60s', 'readBufferSize': 65535}
-    return {
+    config = {
         'log': {'level': 'error'},
         'services': [{'name': 'msboost-' + rule['id'], 'addr': ':' + str(rule['listen_port']),
                       'handler': {'type': protocol}, 'listener': listener, 'limiter': 'paid',
                       'forwarder': {'nodes': [{'name': 'landing', 'addr': endpoint(rule['target_ip'], rule['target_port'])}]}}],
         # $ is the aggregate service budget, $$ would be per connection.
         'limiters': [{'name': 'paid', 'limits': [f'$ {rate}B {rate}B']}]}
+    if source_ip:
+        config['services'][0]['admission'] = 'front-only'
+        config['admissions'] = [{'name': 'front-only', 'whitelist': True, 'matchers': [source_ip]}]
+    return config
 
 def fingerprint_config(rule):
     return hashlib.sha256(json.dumps(gost_config(rule), sort_keys=True).encode()).hexdigest()

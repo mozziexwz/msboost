@@ -21,6 +21,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Plus, RefreshCw, Save, Settings2 } from 'lucide-react';
+import BackupCenter from './backup-center';
 import {
   api,
   Empty,
@@ -112,6 +113,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
             ['users', '用户'],
             ['articles', '公告 / 文档'],
             ['audit', '审计 / 封禁'],
+            ['backup', '备份 / 恢复'],
           ].map(([v, l]) => (
             <TabsTrigger key={v} value={v}>
               {l}
@@ -169,6 +171,18 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
           </div>
           <div className="settings-section">
             <h3>Cloudflare Turnstile</h3>
+            <div className="setting-toggle">
+              <div>
+                <b>启用人机验证</b>
+                <p>关闭时登录、注册、发验证码和重置密码不要求 Turnstile</p>
+              </div>
+              <Switch
+                checked={s.turnstile_enabled}
+                onCheckedChange={(v) =>
+                  setData({ ...data, settings: { ...s, turnstile_enabled: v } })
+                }
+              />
+            </div>
             <div className="form-grid">
               {[
                 ['turnstile_site_key', 'Site Key'],
@@ -317,6 +331,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                   port_start: 30000,
                   port_end: 39999,
                   enabled: false,
+                  requires_front: false,
                 })
               }
             >
@@ -351,6 +366,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                     </TableCell>
                     <TableCell>
                       {l.enabled ? '启用' : '暂停销售'}
+                      {l.requires_front && <small>强制自备前置机</small>}
                       <small>{stamp(l.heartbeat_at)}</small>
                     </TableCell>
                     <TableCell>
@@ -361,6 +377,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                           setEdit({
                             ...l,
                             enabled: Boolean(l.enabled),
+                            requires_front: Boolean(l.requires_front),
                             kind: 'line',
                           })
                         }
@@ -382,6 +399,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
           )}
         </>
       )}
+      {tab === 'backup' && <BackupCenter />}
       {tab === 'plans' && (
         <>
           <div className="subheading mt-6">
@@ -847,6 +865,17 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                     onCheckedChange={(v) => setEdit({ ...edit, trial: v })}
                   />
                   免费新人体验
+                </label>
+              )}
+              {edit.kind === 'line' && (
+                <label className="check-line">
+                  <Switch
+                    checked={Boolean(edit.requires_front)}
+                    onCheckedChange={(v) =>
+                      setEdit({ ...edit, requires_front: v })
+                    }
+                  />
+                  必须使用客户自备前置机
                 </label>
               )}
               {edit.kind === 'article' && (

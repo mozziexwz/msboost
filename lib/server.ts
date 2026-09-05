@@ -126,6 +126,7 @@ export async function decrypt(value: string) {
 }
 export const defaultSettings: Record<string, any> = {
   invite_required: true,
+  turnstile_enabled: false,
   login_failure_threshold: 8,
   login_window_seconds: 900,
   ip_ban_seconds: 1800,
@@ -192,6 +193,7 @@ export async function turnstile(
   action: string,
   s: Record<string, any>,
 ) {
+  if (!s.turnstile_enabled) return;
   assert(s.turnstile_secret && s.turnstile_site_key, '人机验证尚未配置', 503);
   assert(
     typeof token === 'string' && token.length > 0 && token.length <= 2048,
@@ -260,13 +262,13 @@ export function sameOrigin(req: Request) {
     403,
   );
 }
-export async function jsonBody(req: Request) {
+export async function jsonBody(req: Request, maxBytes = 262144) {
   assert(
     (req.headers.get('content-type') || '').includes('application/json'),
     '请使用 JSON 请求',
   );
   const text = await req.text();
-  assert(encoder.encode(text).length <= 262144, '请求内容过大', 413);
+  assert(encoder.encode(text).length <= maxBytes, '请求内容过大', 413);
   let data;
   try {
     data = JSON.parse(text);

@@ -677,6 +677,7 @@ export default function Dashboard() {
                               <b>{l.name}</b>
                               <small>
                                 {l.region} · {l.description || 'Mieru 转发线路'}
+                                {l.requires_front ? ' · 必须自备前置机' : ''}
                               </small>
                             </span>
                             <span
@@ -892,11 +893,13 @@ export default function Dashboard() {
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={!relayReady(r)}
+                              disabled={
+                                !relayReady(r) || Boolean(r.requires_front)
+                              }
                               onClick={() => download(r)}
                             >
                               <Download size={15} />
-                              下载
+                              {r.requires_front ? '仅限前置配置' : '下载'}
                             </Button>
                             {r.front_host ? (
                               <Button

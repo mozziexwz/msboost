@@ -23,6 +23,14 @@ class OperationsTests(unittest.TestCase):
         config=relay.gost_config(self.rule())
         self.assertEqual(config['limiters'][0]['limits'],['$ 6250000B 6250000B'])
         self.assertEqual(config['services'][0]['forwarder']['nodes'][0]['addr'],'8.8.8.8:45001')
+
+    def test_required_front_whitelists_only_the_customer_front_ip(self):
+        rule=self.rule().copy();rule['source_ip']='9.9.9.9'
+        config=relay.gost_config(rule)
+        self.assertEqual(config['services'][0]['admission'],'front-only')
+        self.assertEqual(config['admissions'][0],{'name':'front-only','whitelist':True,'matchers':['9.9.9.9']})
+        rule['source_ip']='127.0.0.1'
+        with self.assertRaises(ValueError): relay.gost_config(rule)
         self.assertNotIn('api',config)
     def test_lease_shorter_than_paid_period_and_network_time(self):
         self.assertEqual(relay.remaining_seconds(self.rule(),1000,1050,3),47)

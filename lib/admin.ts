@@ -25,7 +25,7 @@ export async function adminSnapshot() {
   return {
     settings: s,
     lines: await rows(
-      'SELECT id,name,region,description,host,port_start,port_end,enabled,heartbeat_at,probe_label FROM lines',
+      'SELECT id,name,region,description,host,port_start,port_end,enabled,requires_front,heartbeat_at,probe_label FROM lines',
     ),
     plans: await rows('SELECT * FROM plans ORDER BY sort'),
     invitations: await rows(
@@ -98,6 +98,13 @@ export async function adminAction(
       ),
     ]);
   } else if (action === 'settings') {
+    const current = await settings();
+    if (b.turnstile_enabled === true)
+      assert(
+        (b.turnstile_secret || current.turnstile_secret) &&
+          b.turnstile_site_key,
+        '启用 Turnstile 前请先填写 Site Key 和 Secret Key',
+      );
     const updates = [];
     for (const [k, v] of Object.entries(b)) {
       assert(k in defaultSettings || secretKeys.includes(k), '未知设置项');
@@ -116,6 +123,7 @@ export async function adminAction(
       if (
         [
           'invite_required',
+          'turnstile_enabled',
           'epay_alipay',
           'epay_wxpay',
           'terms_confirmed',
@@ -170,7 +178,7 @@ export async function adminAction(
       );
     }
     await stmt(
-      'INSERT INTO lines(id,name,region,description,host,port_start,port_end,enabled,token_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,region=excluded.region,description=excluded.description,host=excluded.host,port_start=excluded.port_start,port_end=excluded.port_end,enabled=excluded.enabled,probe_label=?',
+      'INSERT INTO lines(id,name,region,description,host,port_start,port_end,enabled,requires_front,token_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,region=excluded.region,description=excluded.description,host=excluded.host,port_start=excluded.port_start,port_end=excluded.port_end,enabled=excluded.enabled,requires_front=excluded.requires_front,probe_label=?',
       lid,
       text(b.name, 60, '线路名'),
       text(b.region, 60, '地区'),
@@ -179,10 +187,19 @@ export async function adminAction(
       start,
       end,
       b.enabled ? 1 : 0,
+      b.requires_front ? 1 : 0,
       await hash(token),
       now(),
       String(b.probe_label || '线路服务器 → 配置的探测目标').slice(0, 100),
     ).run();
+    if (
+      existing &&
+      Boolean(existing.requires_front) !== Boolean(b.requires_front)
+    )
+      await stmt(
+        'UPDATE relays SET revision=revision+1 WHERE line_id=?',
+        lid,
+      ).run();
     await audit(req, u.id, 'admin.line', lid);
     return { id: lid, ...(!existing ? { node_token: token } : {}) };
   } else if (action === 'rotate-line-token') {

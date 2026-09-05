@@ -80,7 +80,7 @@ export async function saveConfig(u: User, relayId: string, source: string) {
 }
 export async function getConfig(u: User, relayId: string, front = false) {
   const r = await one(
-    'SELECT r.*,c.object_key FROM relays r JOIN config_files c ON c.relay_id=r.id WHERE r.id=? AND r.user_id=?',
+    'SELECT r.*,c.object_key,l.requires_front FROM relays r JOIN config_files c ON c.relay_id=r.id JOIN lines l ON l.id=r.line_id WHERE r.id=? AND r.user_id=?',
     relayId,
     u.id,
   );
@@ -88,6 +88,11 @@ export async function getConfig(u: User, relayId: string, front = false) {
     r && r.expires_at > now() && !r.suspended,
     '配置不存在、已到期或转发已暂停',
     404,
+  );
+  assert(
+    !r.requires_front || front,
+    '此线路必须先部署自备前置机并下载前置配置',
+    403,
   );
   const obj = await bucket().get(r.object_key);
   assert(obj, '配置已删除，请重新上传原始文件生成', 404);
