@@ -43,6 +43,27 @@ export default function VpsTools({
     [jobId, setJobId] = useState('');
   const [relayId, setRelayId] = useState(''),
     [frontPort, setFrontPort] = useState(31000);
+  const [quota, setQuota] = useState<any>(null);
+  const [quotaError, setQuotaError] = useState('');
+  const [clock, setClock] = useState(Date.now());
+  async function refreshQuota() {
+    try {
+      const result = await api('vps/probe');
+      setQuota({ ...result, receivedAt: Date.now() });
+      setQuotaError('');
+    } catch { setQuotaError('暂时无法读取检查次数，请稍后重试'); }
+  }
+  useEffect(() => {
+    if (!user) return;
+    refreshQuota();
+    const timer = setInterval(() => setClock(Date.now()), 1000);
+    const refresh = setInterval(refreshQuota, 30000);
+    return () => { clearInterval(timer); clearInterval(refresh); };
+  }, [user?.id]);
+  const secondsLeft = quota?.reset_at
+    ? Math.max(0, Math.ceil(quota.reset_at - quota.server_time - (clock - quota.receivedAt) / 1000)) : 0;
+  const quotaExpired = quota?.reset_at && secondsLeft === 0;
+  const remaining = quotaExpired ? 10 : quota?.remaining;
   useEffect(() => {
     setNewPort(20000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 40000));
   }, []);
@@ -77,6 +98,7 @@ export default function VpsTools({
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      await refreshQuota();
       setBusy(false);
     }
   }
@@ -223,12 +245,18 @@ export default function VpsTools({
         <div className="fingerprint">
           <Button
             variant="outline"
-            disabled={busy || !ip || !settings.worker_ready}
+            disabled={busy || !ip || !settings.worker_ready || (quota && !quota.unlimited && remaining === 0)}
             onClick={probe}
           >
             <Fingerprint size={16} />
             检查主机指纹
           </Button>
+          <p aria-live="polite">
+            {quota?.unlimited ? '管理员：主机指纹检查不限次数，无冷却限制。' : quota
+              ? `每 30 分钟最多 10 次（失败也计次） · 剩余 ${remaining}/10 次${secondsLeft > 0 ? ` · ${remaining === 0 ? '冷却剩余' : '额度重置倒计时'} ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')}` : ' · 冷却时间 30 分钟，从首次检查开始计算'}`
+              : '正在读取检查次数…'}
+          </p>
+          {quotaError && <Notice text={quotaError} />}
           {fingerprint && (
             <>
               <code>{fingerprint}</code>

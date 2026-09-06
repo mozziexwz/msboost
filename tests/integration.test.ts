@@ -4,7 +4,7 @@ import { env, sqlite, objects } from './bindings.ts';
 import { id, now, DAY } from '../lib/core.ts';
 import { createOrder, settleOrder } from '../lib/commerce.ts';
 import { saveConfig, getConfig, purgeExpired } from '../lib/configs.ts';
-import { encrypt, stmt, one, hash, turnstile, hmac } from '../lib/server.ts';
+import { encrypt, stmt, one, hash, turnstile, hmac, probeQuota } from '../lib/server.ts';
 import { createBackup, restoreBackup } from '../lib/backup.ts';
 import {
   setupAdmin,
@@ -28,6 +28,22 @@ const user: any = {
   disabled: 0,
 };
 const line = id();
+test('fingerprint quota: admin unlimited, customers ten per fixed thirty minutes', async () => {
+  const customer = { id: 'quota-test', role: 'customer' };
+  await stmt('DELETE FROM rate_limits WHERE key=?', 'vps-probe-v2:quota-test').run();
+  assert.equal((await probeQuota(customer)).remaining, 10);
+  const results = await Promise.all(Array.from({ length: 12 }, () => probeQuota(customer, true).then(() => true, () => false)));
+  assert.equal(results.filter(Boolean).length, 10);
+  const limited = await probeQuota(customer);
+  assert.equal(limited.remaining, 0);
+  assert.ok(limited.reset_at! <= now() + 1800);
+  await assert.rejects(() => probeQuota(customer, true));
+  assert.equal((await probeQuota(customer)).reset_at, limited.reset_at);
+  for (let i = 0; i < 12; i++) assert.equal((await probeQuota({ ...customer, role: 'admin' }, true)).unlimited, true);
+  await stmt('UPDATE rate_limits SET reset_at=? WHERE key=?', now() - 1, 'vps-probe-v2:quota-test').run();
+  assert.equal((await probeQuota(customer)).remaining, 10);
+  assert.equal((await probeQuota(customer, true)).remaining, 9);
+});
 function fixture() {
   sqlite.exec(
     'DELETE FROM fronts;DELETE FROM config_files;DELETE FROM grants;DELETE FROM orders;DELETE FROM relays;DELETE FROM line_samples;DELETE FROM provision_jobs;DELETE FROM sessions;DELETE FROM users;DELETE FROM lines;DELETE FROM plans;DELETE FROM settings;DELETE FROM audit_logs;',

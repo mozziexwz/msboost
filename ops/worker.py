@@ -67,6 +67,24 @@ def connect(data, authenticate=True):
         transport.close()
         raise
 
+def remote_failure(output):
+    # Never expose raw remote stdout/stderr: it may contain credentials.
+    stages = {
+        'dependencies': '安装 APT 依赖失败，请检查软件源、磁盘空间及 apt 锁',
+        'clock': '时间同步失败，请检查 chrony、NTP 连通性及系统权限',
+        'binary_download': '下载 Mihomo 失败，请检查 GitHub 连通性及 /usr/local 磁盘空间',
+        'checksum': 'Mihomo 发布文件校验失败，请重试下载',
+        'unpack': '解压 Mihomo 失败，请检查 /usr/local 磁盘空间',
+        'rules_download': '下载 GFW 规则失败，请检查 raw.githubusercontent.com 连通性',
+        'config_check': 'Mihomo 配置校验失败，请检查内核兼容性及 /usr/local 是否允许执行',
+        'service_start': 'msboost-mieru 服务启动失败，请检查客户 VPS 上的服务日志',
+        'selftest': 'Mieru 本机端到端测试失败，请检查出站网络和服务状态',
+        'result': '生成客户端配置失败，请检查 /run 剩余空间',
+    }
+    found = [line.removeprefix('MSBOOST_STAGE=') for line in output.decode(errors='replace').splitlines()
+             if line.startswith('MSBOOST_STAGE=')]
+    return stages.get(found[-1] if found else '', '远端步骤失败，请检查系统依赖、权限、网络与服务状态')
+
 def command(transport, script, timeout=120, root=False):
     channel = transport.open_session(timeout=10)
     channel.set_combine_stderr(True)
@@ -85,7 +103,7 @@ def command(transport, script, timeout=120, root=False):
             if channel.exit_status_ready() and not channel.recv_ready():
                 status = channel.recv_exit_status()
                 if status:
-                    raise RuntimeError('远端步骤失败，请检查系统依赖、权限、网络与服务状态')
+                    raise ValueError(remote_failure(output))
                 return output.decode(errors='replace')
             time.sleep(0.05)
         raise TimeoutError('远端步骤超时，请勿重复重装，先检查 VPS 状态')

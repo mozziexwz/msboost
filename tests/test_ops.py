@@ -17,6 +17,21 @@ class FakeProcess:
     def wait(self, timeout=None): return -9
 
 class OperationsTests(unittest.TestCase):
+    def test_remote_failure_reports_only_allowlisted_stage(self):
+        message = worker.remote_failure(b'MSBOOST_STAGE=unpack\nsecret-password\nMSBOOST_STAGE=config_check\nprivate-config')
+        self.assertIn('配置校验失败', message)
+        self.assertNotIn('secret', message)
+        self.assertNotIn('private', message)
+        self.assertNotIn('secret', worker.remote_failure(b'MSBOOST_STAGE=secret'))
+
+    def test_install_keeps_executable_and_large_backups_off_run_tmpfs(self):
+        script = (Path(__file__).resolve().parents[1] / 'ops' / 'remote-install.sh').read_text(encoding='utf-8')
+        self.assertIn('mktemp -d /usr/local/lib/msboost/.install.XXXXXX', script)
+        self.assertNotIn('$TEMP_DIR/mihomo', script)
+        self.assertNotIn('$TEMP_DIR/old-bin', script)
+        self.assertNotIn('$TEMP_DIR/core.gz', script)
+        self.assertIn('trap cleanup EXIT', script)
+
     def test_backend_smtp_configuration_uses_tls_and_saved_credentials(self):
         data = {'email': 'owner@gmail.com', 'purpose': 'test', 'smtp': {'host': 'smtp.qq.com', 'port': 465, 'username': 'sender@qq.com', 'password': 'smtp-test-secret', 'from': 'sender@qq.com'}}
         with patch.object(worker.socket, 'getaddrinfo', return_value=[(2, 1, 6, '', ('8.8.8.8', 465))]), patch.object(worker.smtplib, 'SMTP_SSL') as client:

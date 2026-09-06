@@ -18,6 +18,7 @@ import {
   stmt,
   text,
   throttle,
+  probeQuota,
   workerFetch,
 } from '@/lib/server';
 import {
@@ -368,8 +369,9 @@ async function handle(req: Request) {
         return json({ ok: true });
       }
     }
+    if (method === 'GET' && path === 'vps/probe') return json(await probeQuota(u));
     if (method === 'POST' && path === 'vps/probe') {
-      await throttle('vps-probe:' + u.id, 10, 3600);
+      await probeQuota(u, true);
       assert(publicIp(b.ip), '请输入公网 IP');
       int(b.ssh_port, 1, 65535, 'SSH 端口');
       return json(

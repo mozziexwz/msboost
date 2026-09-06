@@ -215,6 +215,22 @@ export async function audit(
     now(),
   ).run();
 }
+export async function probeQuota(user: { id: string; role: string }, consume = false) {
+  const t = now();
+  if (user.role === 'admin') return { unlimited: true, used: 0, remaining: null, reset_at: null, server_time: t };
+  const key = 'vps-probe-v2:' + user.id;
+  if (consume) {
+    const accepted = await stmt(
+      'INSERT INTO rate_limits(key,count,reset_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN reset_at<=? THEN 1 ELSE count+1 END,reset_at=CASE WHEN reset_at<=? THEN ? ELSE reset_at END WHERE reset_at<=? OR count<10 RETURNING count',
+      key, t + 1800, t, t, t + 1800, t,
+    ).first<any>();
+    assert(accepted, '主机指纹检查已用完 10 次，请等待页面冷却倒计时结束', 429);
+  }
+  const row = await one('SELECT count,reset_at FROM rate_limits WHERE key=?', key);
+  const active = row && row.reset_at > t;
+  const used = active ? Math.min(10, row.count) : 0;
+  return { unlimited: false, used, remaining: 10 - used, reset_at: active ? row.reset_at : null, server_time: t };
+}
 export async function throttle(key: string, max: number, seconds: number) {
   const t = now();
   const r = await stmt(
