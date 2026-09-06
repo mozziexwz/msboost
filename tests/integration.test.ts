@@ -28,6 +28,22 @@ const user: any = {
   disabled: 0,
 };
 const line = id();
+test('deployment quota is independent, ignores legacy daily limit and exempts admins', async () => {
+  const customer = { id: 'deployment-quota-test', role: 'customer' };
+  await stmt('INSERT OR REPLACE INTO rate_limits(key,count,reset_at) VALUES(?,100,?)', 'vps-jobs:' + customer.id, now() + DAY).run();
+  assert.equal((await probeQuota(customer, false, 'deploy')).remaining, 10);
+  const results = await Promise.all(Array.from({ length: 12 }, () => probeQuota(customer, true, 'deploy').then(() => true, () => false)));
+  assert.equal(results.filter(Boolean).length, 10);
+  const quota = await probeQuota(customer, false, 'deploy');
+  assert.equal(quota.remaining, 0);
+  assert.ok(quota.reset_at! <= now() + 1800);
+  assert.equal((await probeQuota(customer)).remaining, 10);
+  await assert.rejects(() => probeQuota(customer, true, 'deploy'), /部署提交已用完/);
+  assert.equal((await probeQuota(customer, false, 'deploy')).reset_at, quota.reset_at);
+  for (let i = 0; i < 12; i++) assert.equal((await probeQuota({ ...customer, role: 'admin' }, true, 'deploy')).unlimited, true);
+  await stmt('UPDATE rate_limits SET reset_at=? WHERE key=?', now() - 1, 'vps-deploy-v2:' + customer.id).run();
+  assert.equal((await probeQuota(customer, true, 'deploy')).remaining, 9);
+});
 test('fingerprint quota: admin unlimited, customers ten per fixed thirty minutes', async () => {
   const customer = { id: 'quota-test', role: 'customer' };
   await stmt('DELETE FROM rate_limits WHERE key=?', 'vps-probe-v2:quota-test').run();

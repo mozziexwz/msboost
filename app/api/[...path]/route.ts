@@ -273,7 +273,7 @@ async function handle(req: Request) {
         new URL(req.url).searchParams.get('front') === '1',
       );
     }
-    if (method === 'POST' && !(path === 'vps/probe' && u.role === 'admin'))
+    if (method === 'POST' && !(['vps/probe', 'vps/jobs'].includes(path) && u.role === 'admin'))
       await throttle('write:' + u.id, 100, 60);
     if (method === 'POST' && path === 'orders')
       return json(await createOrder(req, u, b));
@@ -382,8 +382,9 @@ async function handle(req: Request) {
         }),
       );
     }
+    if (method === 'GET' && path === 'vps/deploy-quota') return json(await probeQuota(u, false, 'deploy'));
     if (method === 'POST' && path === 'vps/jobs') {
-      await throttle('vps-jobs:' + u.id, 3, DAY);
+      await probeQuota(u, true, 'deploy');
       assert(publicIp(b.ip), '请输入公网 IP');
       assert(['install', 'dd', 'front'].includes(b.kind), '任务类型无效');
       assert(b.confirm === b.ip, '请再次输入目标 IP 确认');

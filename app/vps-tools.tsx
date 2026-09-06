@@ -44,14 +44,16 @@ export default function VpsTools({
   const [relayId, setRelayId] = useState(''),
     [frontPort, setFrontPort] = useState(31000);
   const [quota, setQuota] = useState<any>(null);
+  const [deployQuota, setDeployQuota] = useState<any>(null);
   const [quotaError, setQuotaError] = useState('');
   const [clock, setClock] = useState(Date.now());
   async function refreshQuota() {
     try {
-      const result = await api('vps/probe');
+      const [result, deploy] = await Promise.all([api('vps/probe'), api('vps/deploy-quota')]);
       setQuota({ ...result, receivedAt: Date.now() });
+      setDeployQuota({ ...deploy, receivedAt: Date.now() });
       setQuotaError('');
-    } catch { setQuotaError('暂时无法读取检查次数，请稍后重试'); }
+    } catch { setQuotaError('暂时无法读取检查或部署次数，请稍后重试'); }
   }
   useEffect(() => {
     if (!user) return;
@@ -64,6 +66,13 @@ export default function VpsTools({
     ? Math.max(0, Math.ceil(quota.reset_at - quota.server_time - (clock - quota.receivedAt) / 1000)) : 0;
   const quotaExpired = quota?.reset_at && secondsLeft === 0;
   const remaining = quotaExpired ? 10 : quota?.remaining;
+  const deploySeconds = deployQuota?.reset_at
+    ? Math.max(0, Math.ceil(deployQuota.reset_at - deployQuota.server_time - (clock - deployQuota.receivedAt) / 1000)) : 0;
+  const deployRemaining = deployQuota?.reset_at && deploySeconds === 0 ? 10 : deployQuota?.remaining;
+  const deployBlocked = deployQuota && !deployQuota.unlimited && deployRemaining === 0;
+  const deployQuotaText = deployQuota?.unlimited ? '管理员：部署不限次数，无冷却限制。' : deployQuota
+    ? `部署额度：每 30 分钟最多 10 次（失败也计次），与指纹检查分别计数 · 剩余 ${deployRemaining}/10 次${deploySeconds > 0 ? ` · ${deployBlocked ? '冷却剩余' : '额度重置倒计时'} ${Math.floor(deploySeconds / 60)}:${String(deploySeconds % 60).padStart(2, '0')}` : ' · 从首次提交开始计时'}`
+    : '正在读取部署次数…';
   useEffect(() => {
     setNewPort(20000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 40000));
   }, []);
@@ -124,6 +133,7 @@ export default function VpsTools({
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      await refreshQuota();
       setBusy(false);
     }
   }
@@ -274,9 +284,10 @@ export default function VpsTools({
         {!settings.worker_ready && (
           <Notice text="管理员尚未接入一次性执行服务器，暂不能发起部署。" />
         )}
+        <p aria-live="polite">{deployQuotaText}</p>
         <Button
           disabled={
-            busy ||
+            busy || deployBlocked ||
             !password ||
             !fingerprintConfirmed ||
             (kind === 'front' && !relayId) ||
@@ -386,7 +397,7 @@ export default function VpsTools({
             <AlertDialogCancel>取消</AlertDialogCancel>
             <Button
               variant={kind === 'dd' ? 'destructive' : 'default'}
-              disabled={confirm !== ip || busy}
+              disabled={confirm !== ip || busy || deployBlocked}
               onClick={run}
             >
               {busy ? '正在提交…' : '确认执行'}
