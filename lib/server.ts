@@ -386,7 +386,13 @@ export async function workerFetch(
     url.protocol === 'https:' && !url.username && !url.password,
     '执行服务器必须使用 HTTPS',
   );
-  const r = await fetch(new URL(path, url), {
+  assert(
+    typeof s.worker_token === 'string' && /^[\x21-\x7e]{32,2048}$/.test(s.worker_token),
+    '执行服务器令牌格式无效：请只粘贴随机令牌，不要包含空格、换行或 WORKER_TOKEN= 前缀',
+  );
+  let r: Response;
+  try {
+    r = await fetch(new URL(path, url).href, {
     method: body === undefined ? 'GET' : 'POST',
     headers: {
       Authorization: 'Bearer ' + s.worker_token,
@@ -395,7 +401,21 @@ export async function workerFetch(
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(20000),
     redirect: 'error',
-  });
+    });
+  } catch (e: any) {
+    const message = String(e?.message || '');
+    const category = /timeout|timed out|abort/i.test(message) ? 'timeout'
+      : /certificate|ssl|tls/i.test(message) ? 'tls'
+      : /dns|resolve/i.test(message) ? 'dns'
+      : /header|ByteString|character/i.test(message) ? 'header'
+      : /redirect/i.test(message) ? 'redirect'
+      : 'transport';
+    console.error('msboost.worker.request_failed', JSON.stringify({
+      category, name: e?.name, stage: path === '/probe' ? 'probe' : 'worker',
+      stack: String(e?.stack || '').split('\n').slice(1, 5).join('\n'),
+    }));
+    throw new HttpError(`网站连接执行服务器失败（${category}）；请检查执行服务 HTTPS 地址、证书与访问规则`, 502);
+  }
   let d: any;
   try {
     d = await r.json();

@@ -521,6 +521,11 @@ async function handle(req: Request) {
     assert(false, '接口不存在', 404);
   } catch (e: any) {
     const status = Number(e.status) || 500;
+    if (status === 500) console.error('msboost.api.unexpected', JSON.stringify({
+      stage: path === 'vps/probe' ? 'vps/probe' : 'api',
+      name: e?.name,
+      stack: String(e?.stack || '').split('\n').slice(1, 6).join('\n'),
+    }));
     return json(
       {
         error:
