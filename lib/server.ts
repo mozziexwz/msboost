@@ -400,7 +400,7 @@ export async function workerFetch(
     },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(20000),
-    redirect: 'error',
+    redirect: 'manual',
     });
   } catch (e: any) {
     const message = String(e?.message || '');
@@ -416,6 +416,11 @@ export async function workerFetch(
     }));
     throw new HttpError(`网站连接执行服务器失败（${category}）；请检查执行服务 HTTPS 地址、证书与访问规则`, 502);
   }
+  assert(
+    r.status < 300 || r.status >= 400,
+    `执行服务器返回 HTTP ${r.status} 重定向；为保护凭据已停止请求，请配置直接可达的 HTTPS 接口`,
+    502,
+  );
   let d: any;
   try {
     d = await r.json();
