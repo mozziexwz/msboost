@@ -22,7 +22,6 @@ import {
   ShieldCheck,
   Terminal,
   Wallet,
-  Zap,
 } from 'lucide-react';
 import {
   Sidebar,
@@ -37,6 +36,7 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
+import MapleIcon from './maple-icon';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   Table,
@@ -141,7 +141,7 @@ export default function Dashboard() {
   useEffect(() => {
     refresh();
     const q = new URLSearchParams(location.search).get('view');
-    if (q && links.some((l) => l.id === q)) setView(q);
+    if (q && (q === 'admin' || links.some((l) => l.id === q))) setView(q);
   }, [refresh]);
   useEffect(() => {
     if (!data?.user) return;
@@ -217,7 +217,8 @@ export default function Dashboard() {
         source: JSON.stringify(parsed.config),
       })
         .then(() => refresh())
-        .catch((e: Error) => setError('转发配置保存失败：' + e.message));
+        .catch((e: Error) => setError('转发配置保存失败：' + e.message))
+        .finally(() => saving.current.delete(r.id));
     }
   }, [parsed, data?.relays, user?.id, refresh]);
   useEffect(() => {
@@ -303,6 +304,7 @@ export default function Dashboard() {
       }
       document.body.appendChild(form);
       form.submit();
+      form.remove();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -381,20 +383,16 @@ export default function Dashboard() {
     return (
       <main className="login-screen">
         <div className="login-brand">
-          <Zap fill="currentColor" />
+          <MapleIcon size={32} />
           MSBOOST
         </div>
         <div className="login-card">
           <div className="login-symbol">
-            <LockKeyhole size={32} />
+            <MapleIcon size={44} />
           </div>
-          <p className="eyebrow">MSBOOST.DE</p>
-          <h1>登录你的游戏线路控制台</h1>
+          <h1>登录部署你的专属游戏节点</h1>
           <p className="muted">
-            {settings.invite_required ? '邀请制开放 · ' : ''}
-            {settings.register_email_verification === false
-              ? 'QQ 邮箱注册'
-              : 'QQ 邮箱验证注册'}
+            注册前须知：本站仅协助部署节点，需自备服务器再使用本站服务
           </p>
           <Button className="login-cta" onClick={() => setAuth(true)}>
             登录 / 注册
@@ -421,7 +419,7 @@ export default function Dashboard() {
           </div>
         </div>
         <p className="login-footer">
-          © {new Date().getFullYear()} MSBOOST · msboost.de
+          © {new Date().getFullYear()} MSBOOST
         </p>
         <AuthDialog
           open={auth}
@@ -444,7 +442,7 @@ export default function Dashboard() {
         <SidebarHeader>
           <button onClick={() => navigate('relay')} className="brand">
             <span>
-              <Zap size={22} fill="currentColor" />
+              <MapleIcon size={30} />
             </span>
             MSBOOST<b>BETA</b>
           </button>
@@ -784,7 +782,7 @@ export default function Dashboard() {
                         sub: '保留现有 Mieru 节点',
                       },
                       {
-                        icon: Zap,
+                        icon: MapleIcon,
                         title: 'MSBOOST 优化线路',
                         sub: '独立端口 · 套餐带宽',
                       },

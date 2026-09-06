@@ -150,7 +150,7 @@ export default function Support({
                   required
                 />
               </Field>
-              <Button disabled={busy}>提交工单</Button>
+              <Button type="submit" disabled={busy}>{busy ? '正在提交…' : '提交工单'}</Button>
             </form>
           ) : selected ? (
             <>
@@ -197,7 +197,7 @@ export default function Support({
                   maxLength={5000}
                   required
                 />
-                <Button disabled={busy}>发送回复</Button>
+                <Button type="submit" disabled={busy}>{busy ? '正在发送…' : '发送回复'}</Button>
               </form>
             </>
           ) : (

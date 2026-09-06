@@ -223,7 +223,7 @@ export async function adminAction(
       );
     }
     await stmt(
-      'INSERT INTO lines(id,name,region,description,host,port_start,port_end,enabled,requires_front,token_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,region=excluded.region,description=excluded.description,host=excluded.host,port_start=excluded.port_start,port_end=excluded.port_end,enabled=excluded.enabled,requires_front=excluded.requires_front,probe_label=?',
+      'INSERT INTO lines(id,name,region,description,host,port_start,port_end,enabled,requires_front,token_hash,created_at,probe_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,region=excluded.region,description=excluded.description,host=excluded.host,port_start=excluded.port_start,port_end=excluded.port_end,enabled=excluded.enabled,requires_front=excluded.requires_front,probe_label=excluded.probe_label',
       lid,
       text(b.name, 60, '线路名'),
       text(b.region, 60, '地区'),
@@ -308,7 +308,7 @@ export async function adminAction(
   else if (action === 'article') {
     assert(['policy', 'guide', 'notice'].includes(b.kind), '文章类型无效');
     await stmt(
-      'INSERT INTO articles(id,kind,title,body,published,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,body=excluded.body,published=excluded.published,updated_at=excluded.updated_at',
+      'INSERT INTO articles(id,kind,title,body,published,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,title=excluded.title,body=excluded.body,published=excluded.published,updated_at=excluded.updated_at',
       b.id || id(),
       b.kind,
       text(b.title, 150, '标题'),

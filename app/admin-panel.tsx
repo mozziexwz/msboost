@@ -39,7 +39,8 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
     [success, setSuccess] = useState(''),
     [busy, setBusy] = useState(false),
     [edit, setEdit] = useState<any>(null),
-    [secret, setSecret] = useState('');
+    [secret, setSecret] = useState(''),
+    [copyNotice, setCopyNotice] = useState('');
   async function load() {
     try {
       setData(await api('admin'));
@@ -463,7 +464,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                     </TableCell>
                     <TableCell>
                       {l.enabled ? '启用' : '暂停销售'}
-                      {l.requires_front && <small>强制自备前置机</small>}
+                      {Boolean(l.requires_front) && <small>强制自备前置机</small>}
                       <small>{stamp(l.heartbeat_at)}</small>
                     </TableCell>
                     <TableCell>
@@ -985,9 +986,9 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                 </label>
               )}
               <Notice text={error} />
-              <Button disabled={busy}>
+              <Button type="submit" disabled={busy}>
                 <Save size={16} />
-                保存
+                {busy ? '正在保存…' : '保存'}
               </Button>
             </form>
           )}
@@ -1002,9 +1003,13 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
             </DialogDescription>
           </DialogHeader>
           <pre className="secret-output">{secret}</pre>
-          <Button onClick={() => navigator.clipboard.writeText(secret)}>
+          <Button onClick={async () => {
+            try { await navigator.clipboard.writeText(secret); setCopyNotice('已复制'); }
+            catch { setCopyNotice('浏览器未允许复制，请手动选择上方内容复制'); }
+          }}>
             复制
           </Button>
+          <p role="status">{copyNotice}</p>
         </DialogContent>
       </Dialog>
     </section>

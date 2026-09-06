@@ -12,7 +12,7 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate",
-    "test": "node --experimental-strip-types --test tests/core.test.ts && node --experimental-strip-types --experimental-loader ./tests/loader.mjs --test tests/integration.test.ts",
+    "test": "node --experimental-strip-types --test tests/core.test.ts && node --experimental-strip-types --experimental-loader ./tests/loader.mjs --test tests/integration.test.ts tests/workflows.test.ts",
     "test:ops": "python -m unittest discover -s tests -p test_ops.py -v",
     "typecheck": "tsc --noEmit"
   },

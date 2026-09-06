@@ -89,8 +89,14 @@
   align-items: center;
   margin-bottom: 34px;
 }
-.login-brand svg {
-  color: #ff804c;
+.maple-icon {
+  display: inline-block;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.brand > span:has(.maple-icon) {
+  background: transparent;
+  transform: none;
 }
 .login-card {
   width: min(100%, 470px);
@@ -104,6 +110,7 @@
 .login-card h1 {
   font-size: 24px;
   letter-spacing: -0.5px;
+  text-wrap: balance;
 }
 .login-symbol {
   width: 64px;
@@ -121,6 +128,9 @@
 }
 .login-card > .muted {
   font-size: 14px;
+  line-height: 1.7;
+  margin-top: 14px;
+  text-wrap: balance;
 }
 .login-cta {
   width: 100%;
