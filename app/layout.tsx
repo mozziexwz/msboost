@@ -3,8 +3,11 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'MSBOOST · 游戏线路控制台',
-  description: '自有 VPS 部署 Mieru，上传配置、选择线路、下载转发配置。',
-  icons: { icon: [{ url: '/maple-brand.png', type: 'image/png' }], apple: '/maple-brand.png' },
+  description: '部署专属 MSBOOST 游戏节点，购买套餐并配置隧道中转。',
+  icons: {
+    icon: [{ url: '/maple-brand.png', type: 'image/png' }],
+    apple: '/maple-brand.png',
+  },
 };
 
 export default function RootLayout({

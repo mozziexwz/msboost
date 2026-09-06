@@ -20,6 +20,7 @@ import {
   type User,
 } from './server';
 import { initialArticles } from './content';
+import { remoteBackup } from './backup';
 export async function adminSnapshot() {
   const s = await settings();
   for (const k of secretKeys) {
@@ -29,7 +30,7 @@ export async function adminSnapshot() {
   return {
     settings: s,
     lines: await rows(
-      'SELECT id,name,region,description,host,port_start,port_end,enabled,requires_front,heartbeat_at,probe_label FROM lines',
+      'SELECT id,name,region,description,host,port_start,port_end,enabled,requires_front,heartbeat_at,probe_label,probe_ip FROM lines',
     ),
     plans: await rows('SELECT * FROM plans ORDER BY sort'),
     invitations: await rows(
@@ -48,6 +49,9 @@ export async function adminSnapshot() {
     bans: await rows(
       "SELECT key,count,reset_at,blocked_until FROM rate_limits WHERE key LIKE 'login-ip:%' AND blocked_until>?",
       now(),
+    ),
+    backup_targets: await rows(
+      'SELECT id,name,host,port,username,remote_path,enabled,created_at,1 AS credential_configured FROM backup_targets ORDER BY created_at',
     ),
   };
 }
@@ -160,6 +164,7 @@ export async function adminAction(
           'epay_alipay',
           'epay_wxpay',
           'terms_confirmed',
+          'backup_enabled',
         ].includes(k)
       )
         assert(typeof v === 'boolean', '设置值应为开关');
@@ -169,6 +174,12 @@ export async function adminAction(
       else if (['login_window_seconds', 'ip_ban_seconds'].includes(k))
         int(v, 60, 86400, '时长');
       else if (k === 'retention_days') int(v, 30, 3650, '保存天数');
+      else if (k === 'backup_daily_count') int(v, 1, 24, '每日备份次数');
+      else if (k === 'backup_time')
+        assert(
+          typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v),
+          '备份时间无效',
+        );
       else assert(typeof v === 'string' && v.length <= 2048, '设置值过长');
       if (k === 'smtp_host')
         assert(
@@ -200,6 +211,37 @@ export async function adminAction(
       );
     }
     if (updates.length) await db().batch(updates);
+  } else if (action === 'backup-target') {
+    const targetId = b.id || id(),
+      existing = await one(
+        'SELECT credential FROM backup_targets WHERE id=?',
+        targetId,
+      );
+    const credential = b.credential
+      ? await encrypt(text(b.credential, 512, 'SSH 密码'))
+      : existing?.credential;
+    assert(credential, '请填写 SSH 密码');
+    const host = text(b.host, 253, '备份服务器地址');
+    assert(/^[a-z0-9.:-]+$/i.test(host), '备份服务器地址无效');
+    await stmt(
+      'INSERT INTO backup_targets(id,name,host,port,username,remote_path,credential,enabled,created_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,host=excluded.host,port=excluded.port,username=excluded.username,remote_path=excluded.remote_path,credential=excluded.credential,enabled=excluded.enabled',
+      targetId,
+      text(b.name, 60, '名称'),
+      host,
+      int(b.port, 1, 65535, 'SSH 端口'),
+      text(b.username, 32, 'SSH 用户名'),
+      text(b.remote_path, 200, '远端目录'),
+      credential,
+      b.enabled ? 1 : 0,
+      now(),
+    ).run();
+    await audit(req, u.id, 'admin.backup-target', targetId);
+  } else if (action === 'backup-target-delete') {
+    await stmt('DELETE FROM backup_targets WHERE id=?', b.id).run();
+  } else if (action === 'backup-now') {
+    const result = await remoteBackup();
+    await audit(req, u.id, 'admin.backup.remote', String(result.total));
+    return { message: `远端备份完成：${result.saved}/${result.total} 台` };
   } else if (action === 'line') {
     const lid = b.id || id(),
       token = hex(crypto.getRandomValues(new Uint8Array(32)));
@@ -223,7 +265,7 @@ export async function adminAction(
       );
     }
     await stmt(
-      'INSERT INTO lines(id,name,region,description,host,port_start,port_end,enabled,requires_front,token_hash,created_at,probe_label) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,region=excluded.region,description=excluded.description,host=excluded.host,port_start=excluded.port_start,port_end=excluded.port_end,enabled=excluded.enabled,requires_front=excluded.requires_front,probe_label=excluded.probe_label',
+      'INSERT INTO lines(id,name,region,description,host,port_start,port_end,enabled,requires_front,token_hash,created_at,probe_label,probe_ip) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,region=excluded.region,description=excluded.description,host=excluded.host,port_start=excluded.port_start,port_end=excluded.port_end,enabled=excluded.enabled,requires_front=excluded.requires_front,probe_label=excluded.probe_label,probe_ip=excluded.probe_ip',
       lid,
       text(b.name, 60, '线路名'),
       text(b.region, 60, '地区'),
@@ -236,6 +278,7 @@ export async function adminAction(
       await hash(token),
       now(),
       String(b.probe_label || '线路服务器 → 配置的探测目标').slice(0, 100),
+      String(b.probe_ip || '').slice(0, 45),
     ).run();
     if (
       existing &&
@@ -263,21 +306,19 @@ export async function adminAction(
       typeof pid === 'string' && /^[a-z0-9_-]{1,40}$/.test(pid),
       '套餐 ID 无效',
     );
-    const days = int(b.days, 1, 365, '天数'),
+    const days = int(b.days, 1, 31, '天数'),
       price = int(b.price_cents, 0, 10000000, '金额（分）'),
-      speed = int(b.speed_mbps, 1, 10000, '带宽');
-    assert(!b.trial || (days === 1 && price === 0), '体验卡必须为免费 1 天卡');
-    assert(
-      b.trial || !b.enabled || price > 0,
-      '收费套餐启用前请设置大于零的价格',
-    );
+      speed = int(b.speed_mbps, 1, 10000, '带宽'),
+      traffic = int(b.traffic_gb || 0, 0, 1000000, '套餐流量');
+    assert(!b.trial || price === 0, '新人体验卡必须免费');
     await stmt(
-      'INSERT INTO plans(id,name,days,price_cents,speed_mbps,trial,enabled,sort) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,days=excluded.days,price_cents=excluded.price_cents,speed_mbps=excluded.speed_mbps,trial=excluded.trial,enabled=excluded.enabled,sort=excluded.sort',
+      'INSERT INTO plans(id,name,days,price_cents,speed_mbps,traffic_gb,trial,enabled,sort) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,days=excluded.days,price_cents=excluded.price_cents,speed_mbps=excluded.speed_mbps,traffic_gb=excluded.traffic_gb,trial=excluded.trial,enabled=excluded.enabled,sort=excluded.sort',
       pid,
       text(b.name, 60, '套餐名'),
       days,
       price,
       speed,
+      traffic,
       b.trial ? 1 : 0,
       b.enabled ? 1 : 0,
       int(b.sort || 0, 0, 1000, '排序'),
@@ -335,6 +376,68 @@ export async function adminAction(
     ).run();
     if (b.disabled)
       await stmt('DELETE FROM sessions WHERE user_id=?', b.id).run();
+  } else if (action === 'grant-user') {
+    const customer = await one(
+        "SELECT id FROM users WHERE id=? AND role='customer'",
+        b.user_id,
+      ),
+      line = await one('SELECT * FROM lines WHERE id=?', b.line_id);
+    assert(customer && line, '用户或线路不存在');
+    const expires = int(
+        b.expires_at,
+        now() + 60,
+        now() + 366 * DAY,
+        '到期时间',
+      ),
+      speed = int(b.speed_mbps, 1, 10000, '带宽'),
+      remaining = int(b.remaining_gb || 0, 0, 1000000, '剩余流量');
+    let relay = await one(
+      'SELECT * FROM relays WHERE user_id=? ORDER BY expires_at DESC LIMIT 1',
+      b.user_id,
+    );
+    if (!relay) {
+      const used = new Set(
+        (
+          await rows('SELECT listen_port FROM relays WHERE line_id=?', line.id)
+        ).map((x) => x.listen_port),
+      );
+      for (let port = line.port_start; port <= line.port_end; port++) {
+        if (used.has(port)) continue;
+        try {
+          await stmt(
+            'INSERT INTO relays(id,user_id,line_id,target_host,target_ip,target_port,protocol,listen_port,expires_at,speed_mbps,traffic_limit_bytes,suspended,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            id(),
+            b.user_id,
+            line.id,
+            'pending.invalid',
+            '0.0.0.0',
+            1,
+            'TCP',
+            port,
+            expires,
+            speed,
+            remaining * 1073741824,
+            1,
+            now(),
+          ).run();
+          break;
+        } catch (e) {
+          if (!String(e).includes('UNIQUE')) throw e;
+        }
+      }
+      relay = await one('SELECT * FROM relays WHERE user_id=?', b.user_id);
+      assert(relay, '线路端口已用完', 409);
+    } else {
+      assert(relay.line_id === line.id, '现有套餐线路不同，请先处理原线路');
+      await stmt(
+        "UPDATE relays SET expires_at=?,speed_mbps=?,traffic_limit_bytes=?,traffic_used_bytes=0,suspended=CASE WHEN target_ip='0.0.0.0' THEN 1 ELSE 0 END,revision=revision+1,reported_state='pending' WHERE id=?",
+        expires,
+        speed,
+        remaining * 1073741824,
+        relay.id,
+      ).run();
+    }
+    await audit(req, u.id, 'admin.grant-user', b.user_id);
   } else if (action === 'unban')
     await stmt(
       'DELETE FROM rate_limits WHERE key=?',

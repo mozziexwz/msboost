@@ -10,6 +10,7 @@ import {
   type User,
 } from './server';
 import { parseConfig, rewriteConfig } from './mieru';
+import { resolveTarget } from './server';
 function bucket(): R2Bucket {
   assert(env.CONFIGS, '配置文件存储尚未接入', 503);
   return env.CONFIGS;
@@ -33,11 +34,16 @@ export async function saveConfig(u: User, relayId: string, source: string) {
         t.protocol === r.protocol,
     );
   assert(target, '配置与此转发的原始节点不一致');
-  const transformed = rewriteConfig(config, target, {
-    host: r.relay_host,
-    port: r.listen_port,
-    name: r.line_name,
-  });
+  const transformed = rewriteConfig(
+    config,
+    target,
+    {
+      host: r.relay_host,
+      port: r.listen_port,
+      name: r.line_name,
+    },
+    u.email.split('@')[0],
+  );
   const key = 'paid/' + u.id + '/' + relayId + '/' + id() + '.enc';
   // Track every object before upload, so interrupted uploads never become untracked orphans.
   await stmt(
@@ -78,9 +84,76 @@ export async function saveConfig(u: User, relayId: string, source: string) {
   }
   return { saved: true };
 }
+export async function bindConfig(
+  u: User,
+  relayId: string,
+  source: string,
+  targetKey: string,
+) {
+  const relay = await one(
+    'SELECT r.*,l.host AS relay_host FROM relays r JOIN lines l ON l.id=r.line_id WHERE r.id=? AND r.user_id=?',
+    relayId,
+    u.id,
+  );
+  assert(relay && relay.expires_at > now(), '请先购买有效套餐', 403);
+  assert(
+    !relay.suspended || relay.target_ip === '0.0.0.0',
+    '此隧道已被管理员暂停',
+    403,
+  );
+  assert(
+    !relay.traffic_limit_bytes ||
+      relay.traffic_used_bytes < relay.traffic_limit_bytes,
+    '套餐流量已用尽',
+    403,
+  );
+  const parsed = parseConfig(source),
+    target = parsed.targets.find((t) => t.key === targetKey);
+  assert(target, '请选择有效的节点');
+  const targetIp = await resolveTarget(target.host);
+  assert(
+    targetIp !== relay.relay_host && target.host !== relay.relay_host,
+    '不能把本站线路作为落地节点',
+  );
+  await db().batch([
+    stmt(
+      'INSERT OR IGNORE INTO config_garbage(object_key,delete_after) SELECT c.object_key,? FROM config_files c JOIN relays r ON r.id=c.relay_id WHERE r.user_id=? AND r.id<>?',
+      now(),
+      u.id,
+      relayId,
+    ),
+    stmt(
+      'DELETE FROM config_files WHERE relay_id IN (SELECT id FROM relays WHERE user_id=? AND id<>?)',
+      u.id,
+      relayId,
+    ),
+    stmt(
+      "UPDATE relays SET suspended=1,revision=revision+1,reported_state='pending' WHERE user_id=? AND id<>?",
+      u.id,
+      relayId,
+    ),
+    stmt(
+      'INSERT OR IGNORE INTO config_garbage(object_key,delete_after) SELECT object_key,? FROM config_files WHERE relay_id=?',
+      now(),
+      relayId,
+    ),
+    stmt('DELETE FROM config_files WHERE relay_id=?', relayId),
+    stmt(
+      "UPDATE relays SET target_host=?,target_ip=?,target_port=?,protocol=?,suspended=0,traffic_used_bytes=0,revision=revision+1,reported_state='pending' WHERE id=? AND user_id=?",
+      target.host,
+      targetIp,
+      target.port,
+      target.protocol,
+      relayId,
+      u.id,
+    ),
+  ]);
+  await saveConfig(u, relayId, source);
+  return { saved: true };
+}
 export async function getConfig(u: User, relayId: string, front = false) {
   const r = await one(
-    'SELECT r.*,c.object_key,l.requires_front FROM relays r JOIN config_files c ON c.relay_id=r.id JOIN lines l ON l.id=r.line_id WHERE r.id=? AND r.user_id=?',
+    'SELECT r.*,c.object_key,l.requires_front,l.name AS line_name FROM relays r JOIN config_files c ON c.relay_id=r.id JOIN lines l ON l.id=r.line_id WHERE r.id=? AND r.user_id=?',
     relayId,
     u.id,
   );
@@ -110,7 +183,7 @@ export async function getConfig(u: User, relayId: string, front = false) {
   return new Response(JSON.stringify(config, null, 2), {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      'Content-Disposition': 'attachment; filename="msboost-mieru.json"',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(r.line_name + '.json')}`,
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     },
@@ -123,6 +196,11 @@ export async function purgeExpired(lineId?: string) {
       'SELECT c.object_key FROM config_files c JOIN relays r ON r.id=c.relay_id WHERE r.expires_at<=?' +
       (lineId ? ' AND r.line_id=?' : '');
   const args = lineId ? [t, lineId] : [t];
+  await stmt(
+    'UPDATE relays SET traffic_used_bytes=0,traffic_limit_bytes=0 WHERE expires_at<=?' +
+      (lineId ? ' AND line_id=?' : ''),
+    ...args,
+  ).run();
   // Commit a durable deletion queue and revoke downloads together; failed R2 deletes retry.
   await db().batch([
     stmt(

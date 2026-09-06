@@ -21,13 +21,15 @@ export default function VpsTools({
   settings,
   relays,
   onLogin,
+  frontOnly = false,
 }: {
   user: any;
   settings: any;
   relays: any[];
   onLogin: () => void;
+  frontOnly?: boolean;
 }) {
-  const [kind, setKind] = useState('install'),
+  const [kind, setKind] = useState(frontOnly ? 'front' : 'install'),
     [ip, setIp] = useState(''),
     [port, setPort] = useState(22),
     [username, setUsername] = useState('root'),
@@ -41,7 +43,7 @@ export default function VpsTools({
     [error, setError] = useState(''),
     [job, setJob] = useState<any>(null),
     [jobId, setJobId] = useState('');
-  const [relayId, setRelayId] = useState(''),
+  const [relayId, setRelayId] = useState(relays[0]?.id || ''),
     [frontPort, setFrontPort] = useState(31000);
   const [quota, setQuota] = useState<any>(null);
   const [deployQuota, setDeployQuota] = useState<any>(null);
@@ -49,30 +51,58 @@ export default function VpsTools({
   const [clock, setClock] = useState(Date.now());
   async function refreshQuota() {
     try {
-      const [result, deploy] = await Promise.all([api('vps/probe'), api('vps/deploy-quota')]);
+      const [result, deploy] = await Promise.all([
+        api('vps/probe'),
+        api('vps/deploy-quota'),
+      ]);
       setQuota({ ...result, receivedAt: Date.now() });
       setDeployQuota({ ...deploy, receivedAt: Date.now() });
       setQuotaError('');
-    } catch { setQuotaError('暂时无法读取检查或部署次数，请稍后重试'); }
+    } catch {
+      setQuotaError('暂时无法读取检查或部署次数，请稍后重试');
+    }
   }
   useEffect(() => {
     if (!user) return;
     refreshQuota();
     const timer = setInterval(() => setClock(Date.now()), 1000);
     const refresh = setInterval(refreshQuota, 30000);
-    return () => { clearInterval(timer); clearInterval(refresh); };
+    return () => {
+      clearInterval(timer);
+      clearInterval(refresh);
+    };
   }, [user?.id]);
   const secondsLeft = quota?.reset_at
-    ? Math.max(0, Math.ceil(quota.reset_at - quota.server_time - (clock - quota.receivedAt) / 1000)) : 0;
+    ? Math.max(
+        0,
+        Math.ceil(
+          quota.reset_at -
+            quota.server_time -
+            (clock - quota.receivedAt) / 1000,
+        ),
+      )
+    : 0;
   const quotaExpired = quota?.reset_at && secondsLeft === 0;
   const remaining = quotaExpired ? 10 : quota?.remaining;
   const deploySeconds = deployQuota?.reset_at
-    ? Math.max(0, Math.ceil(deployQuota.reset_at - deployQuota.server_time - (clock - deployQuota.receivedAt) / 1000)) : 0;
-  const deployRemaining = deployQuota?.reset_at && deploySeconds === 0 ? 10 : deployQuota?.remaining;
-  const deployBlocked = deployQuota && !deployQuota.unlimited && deployRemaining === 0;
-  const deployQuotaText = deployQuota?.unlimited ? '管理员：部署不限次数，无冷却限制。' : deployQuota
-    ? `部署额度：每 30 分钟最多 10 次（失败也计次），与指纹检查分别计数 · 剩余 ${deployRemaining}/10 次${deploySeconds > 0 ? ` · ${deployBlocked ? '冷却剩余' : '额度重置倒计时'} ${Math.floor(deploySeconds / 60)}:${String(deploySeconds % 60).padStart(2, '0')}` : ' · 从首次提交开始计时'}`
-    : '正在读取部署次数…';
+    ? Math.max(
+        0,
+        Math.ceil(
+          deployQuota.reset_at -
+            deployQuota.server_time -
+            (clock - deployQuota.receivedAt) / 1000,
+        ),
+      )
+    : 0;
+  const deployRemaining =
+    deployQuota?.reset_at && deploySeconds === 0 ? 10 : deployQuota?.remaining;
+  const deployBlocked =
+    deployQuota && !deployQuota.unlimited && deployRemaining === 0;
+  const deployQuotaText = deployQuota?.unlimited
+    ? '管理员：部署不限次数，无冷却限制。'
+    : deployQuota
+      ? `部署额度：每 30 分钟最多 10 次（失败也计次），与指纹检查分别计数 · 剩余 ${deployRemaining}/10 次${deploySeconds > 0 ? ` · ${deployBlocked ? '冷却剩余' : '额度重置倒计时'} ${Math.floor(deploySeconds / 60)}:${String(deploySeconds % 60).padStart(2, '0')}` : ' · 从首次提交开始计时'}`
+      : '正在读取部署次数…';
   useEffect(() => {
     setNewPort(20000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 40000));
   }, []);
@@ -141,8 +171,8 @@ export default function VpsTools({
     return (
       <section className="panel">
         <Empty
-          title="登录后免费使用 VPS 工具"
-          body="支持在你自己的 Debian/Ubuntu VPS 上部署 Mieru，或重装为 Debian 12。"
+          title="登录后免费使用 VPS 节点部署"
+          body="支持在你自己的 Debian/Ubuntu VPS 上部署 MSBOOST 节点，或重装为 Debian 12。"
         />
         <Button onClick={onLogin} className="mt-5">
           登录 / 注册
@@ -155,37 +185,39 @@ export default function VpsTools({
         <div className="panel-heading">
           <Terminal size={22} />
           <div>
-            <h2>自有 VPS 工具</h2>
+            <h2>{frontOnly ? '自备前置机' : 'VPS 节点部署'}</h2>
             <p>一次性部署 · SSH 凭据仅在任务运行时处理</p>
           </div>
           <span className="pill live ml-auto">免费</span>
         </div>
-        <Tabs
-          value={kind}
-          onValueChange={(v) => setKind(String(v))}
-          className="mt-6"
-        >
-          <TabsList>
-            <TabsTrigger value="install">部署 Mieru</TabsTrigger>
-            <TabsTrigger value="dd">DD 系统</TabsTrigger>
-            <TabsTrigger value="front">自备前置机</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        {kind === 'front' && (
-          <div className="front-chain">
+        {!frontOnly && (
+          <Tabs
+            value={kind}
+            onValueChange={(v) => setKind(String(v))}
+            className="mt-6"
+          >
+            <TabsList className="deployment-tabs">
+              <TabsTrigger value="install">部署 MSBOOST 节点</TabsTrigger>
+              <TabsTrigger value="dd">重装 Debian 12</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        )}
+        {frontOnly && (
+          <div className="front-chain mt-6">
             <strong>客户前置 VPS → MSBOOST 中转 → 客户落地 VPS</strong>
             <p>
-              在自备入口 VPS
-              安装转发服务，指向已购买的本站端口。套餐到期后，本站中转自动断流。
+              为已购买且已绑定节点的隧道部署前置入口；套餐到期后中转会自动断开。
             </p>
             <div className="form-grid">
-              <Field label="已购买的转发线路">
+              <Field label="有效隧道">
                 <Picker
                   value={relayId}
                   onChange={setRelayId}
                   options={relays
                     .filter(
-                      (r) => r.expires_at > Date.now() / 1000 && !r.suspended,
+                      (r) =>
+                        r.expires_at > Date.now() / 1000 &&
+                        r.target_ip !== '0.0.0.0',
                     )
                     .map((r) => ({
                       value: r.id,
@@ -206,7 +238,7 @@ export default function VpsTools({
           </div>
         )}
         <div className="form-grid mt-6">
-          <Field label={kind === 'front' ? '前置 VPS 公网 IP' : 'VPS 公网 IP'}>
+          <Field label={frontOnly ? '前置 VPS 公网 IP' : 'VPS 公网 IP'}>
             <Input
               value={ip}
               onChange={(e) => setIp(e.target.value)}
@@ -236,7 +268,7 @@ export default function VpsTools({
             />
           </Field>
         </div>
-        {kind === 'dd' && (
+        {!frontOnly && kind === 'dd' && (
           <div className="dd-warning">
             <strong>Debian 12 · 重装将清除系统及数据</strong>
             <p>
@@ -255,16 +287,23 @@ export default function VpsTools({
         <div className="fingerprint">
           <Button
             variant="outline"
-            disabled={busy || !ip || !settings.worker_ready || (quota && !quota.unlimited && remaining === 0)}
+            disabled={
+              busy ||
+              !ip ||
+              !settings.worker_ready ||
+              (quota && !quota.unlimited && remaining === 0)
+            }
             onClick={probe}
           >
             <Fingerprint size={16} />
             检查主机指纹
           </Button>
           <p aria-live="polite">
-            {quota?.unlimited ? '管理员：主机指纹检查不限次数，无冷却限制。' : quota
-              ? `每 30 分钟最多 10 次（失败也计次） · 剩余 ${remaining}/10 次${secondsLeft > 0 ? ` · ${remaining === 0 ? '冷却剩余' : '额度重置倒计时'} ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')}` : ' · 冷却时间 30 分钟，从首次检查开始计算'}`
-              : '正在读取检查次数…'}
+            {quota?.unlimited
+              ? '管理员：主机指纹检查不限次数，无冷却限制。'
+              : quota
+                ? `每 30 分钟最多 10 次（失败也计次） · 剩余 ${remaining}/10 次${secondsLeft > 0 ? ` · ${remaining === 0 ? '冷却剩余' : '额度重置倒计时'} ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')}` : ' · 冷却时间 30 分钟，从首次检查开始计算'}`
+                : '正在读取检查次数…'}
           </p>
           {quotaError && <Notice text={quotaError} />}
           {fingerprint && (
@@ -287,10 +326,11 @@ export default function VpsTools({
         <p aria-live="polite">{deployQuotaText}</p>
         <Button
           disabled={
-            busy || deployBlocked ||
+            busy ||
+            deployBlocked ||
             !password ||
             !fingerprintConfirmed ||
-            (kind === 'front' && !relayId) ||
+            (frontOnly && !relayId) ||
             !settings.worker_ready
           }
           onClick={() => {
@@ -304,10 +344,10 @@ export default function VpsTools({
           ) : (
             <Terminal size={16} />
           )}{' '}
-          {kind === 'install'
-            ? '开始部署 Mieru'
-            : kind === 'front'
-              ? '部署前置转发'
+          {frontOnly
+            ? '部署前置转发'
+            : kind === 'install'
+              ? '开始部署 MSBOOST 节点'
               : '准备重装 Debian 12'}
         </Button>
         {job && (
@@ -326,64 +366,66 @@ export default function VpsTools({
                 <code>{job.fingerprint}</code>
               </p>
             )}
-            {kind === 'front' && job.state === 'completed' && (
-              <Notice
-                ok
-                text="前置转发已部署。回到套餐与订单页，选择“前置配置”下载使用。"
-              />
+            {frontOnly && job.state === 'completed' && (
+              <Notice ok text="前置转发已部署，可以下载前置配置使用。" />
             )}
             {job.new_ssh_port && (
               <p>
                 新 SSH 端口：<strong>{job.new_ssh_port}</strong>
               </p>
             )}
-            {job.config && (
-              <Button
-                onClick={() =>
-                  downloadJson(job.config, 'msboost-original-mieru.json')
-                }
-              >
+            {!frontOnly && job.config && (
+              <Button onClick={() => downloadJson(job.config, '直连.json')}>
                 <Download size={16} />
-                下载原始 Mieru 配置
+                下载直连配置
               </Button>
             )}
             <small>配置结果仅临时保留 30 分钟，请及时下载。</small>
           </div>
         )}
       </section>
-      <aside className="right-rail">
-        <section className="panel prose">
-          <h3>部署包含</h3>
-          <p>安装 Mihomo 的 Mieru 入站，生成独立节点账号与随机 TCP 端口。</p>
-          <p>
-            加载 GFW 域名屏蔽规则。安装 chrony、tzdata，设置 UTC+8
-            并等待校时成功。
-          </p>
-          <p>
-            服务使用专属的 msboost-mieru 名称。完成后关闭 SSH 会话，客户 VPS
-            不安装管理 Agent。
-          </p>
-        </section>
-        <section className="help-card">
-          <h3>公网可达性</h3>
-          <p>
-            需要放行新 Mieru 端口。云安全组不受 SSH
-            内的防火墙命令控制，部署完成后仍需确认云厂商侧规则。
-          </p>
-        </section>
-      </aside>
+      {!frontOnly && (
+        <aside className="right-rail">
+          <section className="panel prose">
+            <h3>部署包含</h3>
+            <p>
+              安装 MSBOOST 游戏节点，生成与注册邮箱前缀一致的节点名和随机 TCP
+              端口。
+            </p>
+            <p>
+              加载 GFW 域名屏蔽规则。安装 chrony、tzdata，设置 UTC+8
+              并等待校时成功。
+            </p>
+            <p>
+              服务使用专属的 msboost-node 名称。重复部署会先完整移除旧版 MSBOOST
+              节点。完成后关闭 SSH 会话，客户 VPS 不安装管理 Agent。
+            </p>
+          </section>
+          <section className="help-card">
+            <h3>公网可达性</h3>
+            <p>
+              需要放行新的 MSBOOST 节点端口。云安全组不受 SSH
+              内的防火墙命令控制，部署完成后仍需确认云厂商侧规则。
+            </p>
+          </section>
+        </aside>
+      )}
       <AlertDialog open={dialog} onOpenChange={setDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {kind === 'dd' ? '确认清除并重装此 VPS' : '确认部署到此 VPS'}
+              {kind === 'dd'
+                ? '确认清除并重装此 VPS'
+                : frontOnly
+                  ? '确认部署前置机'
+                  : '确认部署到此 VPS'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {kind === 'dd'
                 ? '此操作会清除系统数据。'
-                : kind === 'front'
-                  ? '将安装独立的前置转发服务并配置系统时间。'
-                  : '将安装 Mieru 业务服务并配置系统时间。'}
+                : frontOnly
+                  ? '将在前置 VPS 安装独立转发服务并配置系统时间。'
+                  : '将先移除旧版 MSBOOST 节点，再安装新节点并配置系统时间。'}
               请再次输入目标 IP：{ip}
             </AlertDialogDescription>
           </AlertDialogHeader>

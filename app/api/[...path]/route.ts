@@ -37,14 +37,45 @@ import {
 } from '@/lib/commerce';
 import { adminAction, adminSnapshot } from '@/lib/admin';
 import { initialArticles } from '@/lib/content';
-import { getConfig, purgeExpired, saveConfig } from '@/lib/configs';
+import { bindConfig, getConfig, purgeExpired, saveConfig } from '@/lib/configs';
 import { equal } from '@/lib/core';
-import { createBackup, restoreBackup } from '@/lib/backup';
+import { createBackup, remoteBackup, restoreBackup } from '@/lib/backup';
+import { getArticleImage, saveArticleImage } from '@/lib/content-assets';
 export const dynamic = 'force-dynamic';
+async function ensureContentRevision() {
+  const revision = await one(
+    'SELECT value FROM settings WHERE key=?',
+    'content_revision',
+  );
+  if (revision?.value === '2') return;
+  await db().batch([
+    ...initialArticles
+      .filter((a) =>
+        ['guide-start', 'guide-clock', 'terms', 'privacy', 'aup'].includes(
+          a.id,
+        ),
+      )
+      .map((a) =>
+        stmt(
+          'INSERT INTO articles(id,kind,title,body,published,updated_at) VALUES(?,?,?,?,1,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,title=excluded.title,body=excluded.body,published=1,updated_at=excluded.updated_at',
+          a.id,
+          a.kind,
+          a.title,
+          a.body,
+          now(),
+        ),
+      ),
+    stmt(
+      "INSERT INTO settings(key,value) VALUES('content_revision','2') ON CONFLICT(key) DO UPDATE SET value='2'",
+    ),
+  ]);
+}
 async function handle(req: Request) {
   const path = new URL(req.url).pathname.replace(/^\/api\//, ''),
     method = req.method;
   try {
+    if (method === 'GET' && path.startsWith('content/image/'))
+      return getArticleImage(path.split('/')[2]);
     if (path === 'maintenance/tick' && method === 'POST') {
       const s = await settings(),
         token = req.headers.get('authorization')?.replace(/^Bearer /, '');
@@ -53,7 +84,29 @@ async function handle(req: Request) {
         '维护令牌无效',
         401,
       );
-      return json({ deleted: await purgeExpired() });
+      const deleted = await purgeExpired();
+      let backup = null;
+      if (s.backup_enabled) {
+        const [hour, minute] = String(s.backup_time || '03:00')
+            .split(':')
+            .map(Number),
+          count = Math.max(1, Math.min(24, Number(s.backup_daily_count || 1))),
+          localNow = now() + 8 * 3600,
+          day = Math.floor(localNow / DAY),
+          start = day * DAY + hour * 3600 + minute * 60,
+          elapsed = localNow - start,
+          interval = Math.floor(DAY / count),
+          index = Math.floor(elapsed / interval),
+          slot = `${day}:${index}`;
+        if (elapsed >= 0 && index < count && slot !== s.backup_last_slot) {
+          backup = await remoteBackup();
+          await stmt(
+            "INSERT INTO settings(key,value) VALUES('backup_last_slot',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            JSON.stringify(slot),
+          ).run();
+        }
+      }
+      return json({ deleted, backup });
     }
     if (path === 'payment/notify') {
       assert(['GET', 'POST'].includes(method), '请求方法无效', 405);
@@ -108,17 +161,18 @@ async function handle(req: Request) {
             Number.isInteger(r.revision)
           )
             await stmt(
-              'UPDATE relays SET reported_state=?,reported_revision=?,reported_at=?,last_error=? WHERE id=? AND line_id=?',
+              'UPDATE relays SET reported_state=?,reported_revision=?,reported_at=?,last_error=?,traffic_used_bytes=MAX(traffic_used_bytes,?) WHERE id=? AND line_id=?',
               r.state,
               r.revision,
               t,
               String(r.error || '').slice(0, 200),
+              num(r.traffic_bytes, 0, Number.MAX_SAFE_INTEGER) || 0,
               r.id,
               line.id,
             ).run();
       const desired = line.enabled
         ? await rows(
-            'SELECT r.id,r.target_ip,r.target_port,r.protocol,r.listen_port,r.expires_at,r.speed_mbps,r.revision,CASE WHEN l.requires_front=1 THEN (SELECT host FROM fronts f WHERE f.relay_id=r.id) ELSE NULL END AS source_ip FROM relays r JOIN lines l ON l.id=r.line_id WHERE r.line_id=? AND r.suspended=0 AND r.expires_at>? AND r.user_id IN (SELECT id FROM users WHERE disabled=0) AND (l.requires_front=0 OR EXISTS(SELECT 1 FROM fronts f WHERE f.relay_id=r.id))',
+            'SELECT r.id,r.target_ip,r.target_port,r.protocol,r.listen_port,r.expires_at,r.speed_mbps,r.revision,CASE WHEN l.requires_front=1 THEN (SELECT host FROM fronts f WHERE f.relay_id=r.id) ELSE NULL END AS source_ip FROM relays r JOIN lines l ON l.id=r.line_id WHERE r.line_id=? AND r.suspended=0 AND r.expires_at>? AND (r.traffic_limit_bytes=0 OR r.traffic_used_bytes<r.traffic_limit_bytes) AND r.user_id IN (SELECT id FROM users WHERE disabled=0) AND (l.requires_front=0 OR EXISTS(SELECT 1 FROM fronts f WHERE f.relay_id=r.id))',
             line.id,
             t,
           )
@@ -132,6 +186,7 @@ async function handle(req: Request) {
       return json({ server_time: t, lease_until: t + 180, relays: desired });
     }
     if (method === 'GET' && path === 'bootstrap') {
+      await ensureContentRevision();
       const visitor = await currentUser(req);
       if (!visitor) {
         const s = await settings();
@@ -166,7 +221,7 @@ async function handle(req: Request) {
       ]);
       const mine = u
         ? await rows(
-            'SELECT r.*,l.name AS line_name,l.host AS relay_host,l.heartbeat_at,l.requires_front,EXISTS(SELECT 1 FROM config_files c WHERE c.relay_id=r.id) AS config_saved,(SELECT host FROM fronts f WHERE f.relay_id=r.id) AS front_host,(SELECT port FROM fronts f WHERE f.relay_id=r.id) AS front_port FROM relays r JOIN lines l ON l.id=r.line_id WHERE r.user_id=? ORDER BY r.created_at DESC',
+            'SELECT r.*,l.name AS line_name,l.host AS relay_host,l.heartbeat_at,l.requires_front,EXISTS(SELECT 1 FROM config_files c WHERE c.relay_id=r.id) AS config_saved,(SELECT host FROM fronts f WHERE f.relay_id=r.id) AS front_host,(SELECT port FROM fronts f WHERE f.relay_id=r.id) AS front_port FROM relays r JOIN lines l ON l.id=r.line_id WHERE r.user_id=? ORDER BY r.expires_at DESC,r.created_at DESC LIMIT 1',
             u.id,
           )
         : [];
@@ -213,7 +268,11 @@ async function handle(req: Request) {
       method === 'POST'
         ? await jsonBody(
             req,
-            path === 'admin/backup/restore' ? 8 * 1024 * 1024 : 262144,
+            path === 'admin/backup/restore'
+              ? 8 * 1024 * 1024
+              : path === 'admin/article-image'
+                ? 5 * 1024 * 1024
+                : 262144,
           )
         : {};
     if (method === 'POST' && path === 'auth/code')
@@ -252,6 +311,8 @@ async function handle(req: Request) {
         });
       if (method === 'GET' && path === 'admin')
         return json(await adminSnapshot());
+      if (method === 'POST' && path === 'admin/article-image')
+        return json(await saveArticleImage(b.data_url));
       if (method === 'POST')
         return json(await adminAction(req, u, path.slice(6), b));
     }
@@ -266,6 +327,17 @@ async function handle(req: Request) {
         ),
       );
     }
+    if (method === 'POST' && path === 'relays/bind') {
+      await throttle('config:' + u.id, 10, 60);
+      return json(
+        await bindConfig(
+          u,
+          text(b.relay_id, 40, '转发 ID'),
+          text(b.source, 131072, '配置'),
+          text(b.target_key, 40, '节点'),
+        ),
+      );
+    }
     if (method === 'GET' && path.startsWith('relays/config/')) {
       return getConfig(
         u,
@@ -273,7 +345,10 @@ async function handle(req: Request) {
         new URL(req.url).searchParams.get('front') === '1',
       );
     }
-    if (method === 'POST' && !(['vps/probe', 'vps/jobs'].includes(path) && u.role === 'admin'))
+    if (
+      method === 'POST' &&
+      !(['vps/probe', 'vps/jobs'].includes(path) && u.role === 'admin')
+    )
       await throttle('write:' + u.id, 100, 60);
     if (method === 'POST' && path === 'orders')
       return json(await createOrder(req, u, b));
@@ -370,7 +445,8 @@ async function handle(req: Request) {
         return json({ ok: true });
       }
     }
-    if (method === 'GET' && path === 'vps/probe') return json(await probeQuota(u));
+    if (method === 'GET' && path === 'vps/probe')
+      return json(await probeQuota(u));
     if (method === 'POST' && path === 'vps/probe') {
       await probeQuota(u, true);
       assert(publicIp(b.ip), '请输入公网 IP');
@@ -382,7 +458,8 @@ async function handle(req: Request) {
         }),
       );
     }
-    if (method === 'GET' && path === 'vps/deploy-quota') return json(await probeQuota(u, false, 'deploy'));
+    if (method === 'GET' && path === 'vps/deploy-quota')
+      return json(await probeQuota(u, false, 'deploy'));
     if (method === 'POST' && path === 'vps/jobs') {
       await probeQuota(u, true, 'deploy');
       assert(publicIp(b.ip), '请输入公网 IP');
@@ -450,6 +527,7 @@ async function handle(req: Request) {
           relay_host: relay?.relay_host,
           relay_port: relay?.listen_port,
           protocol: relay?.protocol,
+          profile_name: u.email.split('@')[0],
         });
         await stmt(
           "UPDATE provision_jobs SET state='running',updated_at=? WHERE id=?",
@@ -524,11 +602,18 @@ async function handle(req: Request) {
     assert(false, '接口不存在', 404);
   } catch (e: any) {
     const status = Number(e.status) || 500;
-    if (status === 500) console.error('msboost.api.unexpected', JSON.stringify({
-      stage: path === 'vps/probe' ? 'vps/probe' : 'api',
-      name: e?.name,
-      stack: String(e?.stack || '').split('\n').slice(1, 6).join('\n'),
-    }));
+    if (status === 500)
+      console.error(
+        'msboost.api.unexpected',
+        JSON.stringify({
+          stage: path === 'vps/probe' ? 'vps/probe' : 'api',
+          name: e?.name,
+          stack: String(e?.stack || '')
+            .split('\n')
+            .slice(1, 6)
+            .join('\n'),
+        }),
+      );
     return json(
       {
         error:

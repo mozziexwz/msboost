@@ -27,9 +27,9 @@ class OperationsTests(unittest.TestCase):
     def test_install_keeps_executable_and_large_backups_off_run_tmpfs(self):
         script = (Path(__file__).resolve().parents[1] / 'ops' / 'remote-install.sh').read_text(encoding='utf-8')
         self.assertIn('mktemp -d /usr/local/lib/msboost/.install.XXXXXX', script)
-        self.assertNotIn('$TEMP_DIR/mihomo', script)
-        self.assertNotIn('$TEMP_DIR/old-bin', script)
         self.assertNotIn('$TEMP_DIR/core.gz', script)
+        self.assertNotIn('$TEMP_DIR/old-bin', script)
+        self.assertIn('/usr/local/lib/msboost/core', script)
         self.assertIn('trap cleanup EXIT', script)
 
     def test_backend_smtp_configuration_uses_tls_and_saved_credentials(self):

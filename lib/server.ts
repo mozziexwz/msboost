@@ -145,6 +145,11 @@ export const defaultSettings: Record<string, any> = {
   worker_url: '',
   support_email: '',
   retention_days: 90,
+  backup_enabled: false,
+  backup_mode: 'daily',
+  backup_time: '03:00',
+  backup_daily_count: 1,
+  backup_last_slot: '',
   terms_confirmed: false,
 };
 export const secretKeys = [
@@ -215,21 +220,52 @@ export async function audit(
     now(),
   ).run();
 }
-export async function probeQuota(user: { id: string; role: string }, consume = false, scope: 'probe' | 'deploy' = 'probe') {
+export async function probeQuota(
+  user: { id: string; role: string },
+  consume = false,
+  scope: 'probe' | 'deploy' = 'probe',
+) {
   const t = now();
-  if (user.role === 'admin') return { unlimited: true, used: 0, remaining: null, reset_at: null, server_time: t };
-  const key = (scope === 'probe' ? 'vps-probe-v2:' : 'vps-deploy-v2:') + user.id;
+  if (user.role === 'admin')
+    return {
+      unlimited: true,
+      used: 0,
+      remaining: null,
+      reset_at: null,
+      server_time: t,
+    };
+  const key =
+    (scope === 'probe' ? 'vps-probe-v2:' : 'vps-deploy-v2:') + user.id;
   if (consume) {
     const accepted = await stmt(
       'INSERT INTO rate_limits(key,count,reset_at) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN reset_at<=? THEN 1 ELSE count+1 END,reset_at=CASE WHEN reset_at<=? THEN ? ELSE reset_at END WHERE reset_at<=? OR count<10 RETURNING count',
-      key, t + 1800, t, t, t + 1800, t,
+      key,
+      t + 1800,
+      t,
+      t,
+      t + 1800,
+      t,
     ).first<any>();
-    assert(accepted, (scope === 'probe' ? '主机指纹检查' : '部署提交') + '已用完 10 次，请等待页面冷却倒计时结束', 429);
+    assert(
+      accepted,
+      (scope === 'probe' ? '主机指纹检查' : '部署提交') +
+        '已用完 10 次，请等待页面冷却倒计时结束',
+      429,
+    );
   }
-  const row = await one('SELECT count,reset_at FROM rate_limits WHERE key=?', key);
+  const row = await one(
+    'SELECT count,reset_at FROM rate_limits WHERE key=?',
+    key,
+  );
   const active = row && row.reset_at > t;
   const used = active ? Math.min(10, row.count) : 0;
-  return { unlimited: false, used, remaining: 10 - used, reset_at: active ? row.reset_at : null, server_time: t };
+  return {
+    unlimited: false,
+    used,
+    remaining: 10 - used,
+    reset_at: active ? row.reset_at : null,
+    server_time: t,
+  };
 }
 export async function throttle(key: string, max: number, seconds: number) {
   const t = now();
@@ -403,34 +439,51 @@ export async function workerFetch(
     '执行服务器必须使用 HTTPS',
   );
   assert(
-    typeof s.worker_token === 'string' && /^[\x21-\x7e]{32,2048}$/.test(s.worker_token),
+    typeof s.worker_token === 'string' &&
+      /^[\x21-\x7e]{32,2048}$/.test(s.worker_token),
     '执行服务器令牌格式无效：请只粘贴随机令牌，不要包含空格、换行或 WORKER_TOKEN= 前缀',
   );
   let r: Response;
   try {
     r = await fetch(new URL(path, url).href, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers: {
-      Authorization: 'Bearer ' + s.worker_token,
-      'Content-Type': 'application/json',
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(20000),
-    redirect: 'manual',
+      method: body === undefined ? 'GET' : 'POST',
+      headers: {
+        Authorization: 'Bearer ' + s.worker_token,
+        'Content-Type': 'application/json',
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(20000),
+      redirect: 'manual',
     });
   } catch (e: any) {
     const message = String(e?.message || '');
-    const category = /timeout|timed out|abort/i.test(message) ? 'timeout'
-      : /certificate|ssl|tls/i.test(message) ? 'tls'
-      : /dns|resolve/i.test(message) ? 'dns'
-      : /header|ByteString|character/i.test(message) ? 'header'
-      : /redirect/i.test(message) ? 'redirect'
-      : 'transport';
-    console.error('msboost.worker.request_failed', JSON.stringify({
-      category, name: e?.name, stage: path === '/probe' ? 'probe' : 'worker',
-      stack: String(e?.stack || '').split('\n').slice(1, 5).join('\n'),
-    }));
-    throw new HttpError(`网站连接执行服务器失败（${category}）；请检查执行服务 HTTPS 地址、证书与访问规则`, 502);
+    const category = /timeout|timed out|abort/i.test(message)
+      ? 'timeout'
+      : /certificate|ssl|tls/i.test(message)
+        ? 'tls'
+        : /dns|resolve/i.test(message)
+          ? 'dns'
+          : /header|ByteString|character/i.test(message)
+            ? 'header'
+            : /redirect/i.test(message)
+              ? 'redirect'
+              : 'transport';
+    console.error(
+      'msboost.worker.request_failed',
+      JSON.stringify({
+        category,
+        name: e?.name,
+        stage: path === '/probe' ? 'probe' : 'worker',
+        stack: String(e?.stack || '')
+          .split('\n')
+          .slice(1, 5)
+          .join('\n'),
+      }),
+    );
+    throw new HttpError(
+      `网站连接执行服务器失败（${category}）；请检查执行服务 HTTPS 地址、证书与访问规则`,
+      502,
+    );
   }
   assert(
     r.status < 300 || r.status >= 400,

@@ -336,6 +336,65 @@
   white-space: pre-wrap;
   color: #667488;
 }
+.markdown-body {
+  display: grid;
+  gap: 0.65rem;
+}
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin: 0.5rem 0 0;
+}
+.markdown-body p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.75rem;
+}
+.markdown-body blockquote {
+  margin: 0;
+  padding: 0.8rem 1rem;
+  border-left: 3px solid var(--primary);
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+}
+.markdown-space {
+  height: 0.2rem;
+}
+.markdown-list {
+  padding-left: 0.5rem;
+}
+.policy-scroll {
+  max-height: 52vh;
+  overflow: auto;
+  display: grid;
+  gap: 1.25rem;
+  padding-right: 0.5rem;
+}
+.policy-scroll section {
+  display: grid;
+  gap: 0.6rem;
+}
+.whitespace-pre-wrap {
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.text-link {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.deployment-tabs {
+  gap: 0.75rem;
+  height: auto;
+  padding: 0.4rem;
+}
+.deployment-tabs button {
+  min-height: 3.25rem;
+  padding-inline: 1.25rem;
+}
 .article-row {
   display: flex;
   align-items: center;

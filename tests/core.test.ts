@@ -51,7 +51,7 @@ test('rewrite preserves credentials and client fields, removes direct fallback p
   assert.equal(r.profiles[0].user.password, 'sample-secret-not-real');
   assert.equal(r.profiles[0].servers[0].domainName, 'line.msboost.de');
   assert.equal(r.profiles[0].servers[0].ipAddress, '');
-  assert.equal(r.socks5Port, 1080);
+  assert.equal(r.socks5Port, 6666);
   assert.equal(r.profiles[0].servers[0].portBindings[0].protocol, 'TCP');
 });
 test('IPv6 relay is stored as an address rather than domain', () => {

@@ -1,8 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Download, Upload, LoaderCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -100,6 +101,60 @@ export default function BackupCenter() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [success, setSuccess] = useState('');
+  const [admin, setAdmin] = useState<any>(null),
+    [target, setTarget] = useState({
+      name: '',
+      host: '',
+      port: 22,
+      username: 'root',
+      remote_path: '/var/backups/msboost',
+      credential: '',
+      enabled: true,
+    });
+  async function loadAdmin() {
+    setAdmin(await api('admin'));
+  }
+  useEffect(() => {
+    loadAdmin().catch((e) => setError((e as Error).message));
+  }, []);
+  async function saveTarget() {
+    setBusy(true);
+    setError('');
+    try {
+      await api('admin/backup-target', target);
+      setTarget({
+        name: '',
+        host: '',
+        port: 22,
+        username: 'root',
+        remote_path: '/var/backups/msboost',
+        credential: '',
+        enabled: true,
+      });
+      await loadAdmin();
+      setSuccess('备份服务器已保存');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveSchedule() {
+    setBusy(true);
+    setError('');
+    try {
+      await api('admin/settings', {
+        backup_enabled: Boolean(admin.settings.backup_enabled),
+        backup_time: admin.settings.backup_time,
+        backup_daily_count: Number(admin.settings.backup_daily_count),
+      });
+      setSuccess('自动备份计划已保存');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function download() {
     setBusy(true);
     setError('');
@@ -180,6 +235,161 @@ export default function BackupCenter() {
           )}
           一键下载备份
         </Button>
+      </div>
+      <div className="settings-section">
+        <h3>自动备份到 VPS</h3>
+        <p className="muted">
+          可添加多台备份机。备份经站点主密钥加密后，通过执行服务器写入目标目录；SSH
+          密码加密保存。
+        </p>
+        <div className="form-grid">
+          <Field label="名称">
+            <Input
+              value={target.name}
+              onChange={(e) => setTarget({ ...target, name: e.target.value })}
+            />
+          </Field>
+          <Field label="公网 IP 或域名">
+            <Input
+              value={target.host}
+              onChange={(e) => setTarget({ ...target, host: e.target.value })}
+            />
+          </Field>
+          <Field label="SSH 端口">
+            <Input
+              type="number"
+              value={target.port}
+              onChange={(e) =>
+                setTarget({ ...target, port: Number(e.target.value) })
+              }
+            />
+          </Field>
+          <Field label="SSH 用户名">
+            <Input
+              value={target.username}
+              onChange={(e) =>
+                setTarget({ ...target, username: e.target.value })
+              }
+            />
+          </Field>
+          <Field label="SSH 密码">
+            <Input
+              type="password"
+              value={target.credential}
+              onChange={(e) =>
+                setTarget({ ...target, credential: e.target.value })
+              }
+            />
+          </Field>
+          <Field label="备份目录">
+            <Input
+              value={target.remote_path}
+              onChange={(e) =>
+                setTarget({ ...target, remote_path: e.target.value })
+              }
+            />
+          </Field>
+        </div>
+        <Button
+          variant="outline"
+          disabled={busy || !target.name || !target.host || !target.credential}
+          onClick={saveTarget}
+        >
+          添加备份服务器
+        </Button>
+        {admin?.backup_targets?.map((item: any) => (
+          <div className="article-row" key={item.id}>
+            <span>
+              <b>{item.name}</b>
+              <small>
+                {item.username}@{item.host}:{item.port}
+                {item.remote_path}
+              </small>
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={async () => {
+                await api('admin/backup-target-delete', { id: item.id });
+                await loadAdmin();
+              }}
+            >
+              删除
+            </Button>
+          </div>
+        ))}
+        {admin && (
+          <>
+            <label className="check-line">
+              <Switch
+                checked={Boolean(admin.settings.backup_enabled)}
+                onCheckedChange={(v) =>
+                  setAdmin({
+                    ...admin,
+                    settings: { ...admin.settings, backup_enabled: v },
+                  })
+                }
+              />
+              启用自动备份
+            </label>
+            <div className="form-grid">
+              <Field label="每日首次备份时间（UTC+8）">
+                <Input
+                  type="time"
+                  value={admin.settings.backup_time}
+                  onChange={(e) =>
+                    setAdmin({
+                      ...admin,
+                      settings: {
+                        ...admin.settings,
+                        backup_time: e.target.value,
+                      },
+                    })
+                  }
+                />
+              </Field>
+              <Field label="每日备份次数">
+                <Input
+                  type="number"
+                  min={1}
+                  max={24}
+                  value={admin.settings.backup_daily_count}
+                  onChange={(e) =>
+                    setAdmin({
+                      ...admin,
+                      settings: {
+                        ...admin.settings,
+                        backup_daily_count: Number(e.target.value),
+                      },
+                    })
+                  }
+                />
+              </Field>
+            </div>
+            <div className="inline-fields">
+              <Button onClick={saveSchedule} disabled={busy}>
+                保存自动备份计划
+              </Button>
+              <Button
+                variant="outline"
+                disabled={busy || !admin.backup_targets.length}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    const r = await api('admin/backup-now', {});
+                    setSuccess(r.message);
+                  } catch (e) {
+                    setError((e as Error).message);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                立即备份到全部 VPS
+              </Button>
+            </div>
+          </>
+        )}
       </div>
       <div className="settings-section">
         <h3>上传并恢复</h3>

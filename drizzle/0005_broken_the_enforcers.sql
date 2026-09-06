@@ -1,0 +1,1 @@
+ALTER TABLE `orders` ADD `traffic_gb` integer DEFAULT 0 NOT NULL;

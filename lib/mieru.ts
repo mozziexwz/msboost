@@ -31,7 +31,9 @@ export function parseConfig(text: string): {
     config.profiles.length > 32 ||
     typeof config.activeProfile !== 'string'
   )
-    throw new Error('请上传含 profiles 和 activeProfile 的 Mieru 客户端 JSON');
+    throw new Error(
+      '请上传含 profiles 和 activeProfile 的 MSBOOST 客户端 JSON',
+    );
   const targets: Target[] = [];
   config.profiles.forEach((p, pi) => {
     if (
@@ -87,6 +89,7 @@ export function rewriteConfig(
   config: MieruConfig,
   target: Target,
   relay: { host: string; port: number; name: string },
+  accountName?: string,
 ): MieruConfig {
   const result = structuredClone(config),
     original = result.profiles[target.profile];
@@ -100,12 +103,13 @@ export function rewriteConfig(
     binding.protocol !== target.protocol
   )
     throw new Error('配置与购买的节点不一致');
-  const profileName = `MSBOOST · ${relay.name}`,
+  const profileName = accountName || original.profileName,
     isIp = relay.host.includes(':') || /^\d+\.\d+\.\d+\.\d+$/.test(relay.host);
   result.profiles = [
     {
       ...original,
       profileName,
+      user: { ...original.user, name: accountName || original.user.name },
       servers: [
         {
           ...server,
@@ -117,9 +121,10 @@ export function rewriteConfig(
     },
   ];
   result.activeProfile = profileName;
+  result.socks5Port = 6666;
   return result;
 }
-export function downloadJson(config: unknown, name = 'msboost-mieru.json') {
+export function downloadJson(config: unknown, name = '直连.json') {
   const url = URL.createObjectURL(
     new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' }),
   );

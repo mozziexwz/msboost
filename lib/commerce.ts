@@ -80,11 +80,12 @@ export async function settleOrder(
       orderId,
     ),
     stmt(
-      "UPDATE relays SET expires_at=MAX(expires_at,?)+(SELECT days*? FROM grants WHERE order_id=?),speed_mbps=?,revision=revision+1,suspended=0,reported_state='pending' WHERE id=? AND EXISTS(SELECT 1 FROM grants WHERE order_id=? AND applied=0)",
+      "UPDATE relays SET expires_at=MAX(expires_at,?)+(SELECT days*? FROM grants WHERE order_id=?),speed_mbps=?,traffic_limit_bytes=(SELECT CAST(traffic_gb AS INTEGER)*1073741824 FROM orders WHERE id=?),traffic_used_bytes=0,revision=revision+1,suspended=CASE WHEN target_ip='0.0.0.0' THEN 1 ELSE 0 END,reported_state='pending' WHERE id=? AND EXISTS(SELECT 1 FROM grants WHERE order_id=? AND applied=0)",
       t,
       DAY,
       orderId,
       o.speed_mbps,
+      orderId,
       o.relay_id,
       orderId,
     ),
@@ -111,10 +112,14 @@ export async function createOrder(req: Request, u: User, b: any) {
     409,
   );
   assert(!plan.trial || !u.trial_used, '每个账号仅可领取一次免费体验');
-  const targetHost = text(b.target_host, 253, '节点地址'),
-    targetPort = int(b.target_port, 1, 65535, '节点端口');
-  assert(['TCP', 'UDP'].includes(b.protocol), '无效的隧道协议');
-  const targetIp = await resolveTarget(targetHost);
+  const hasTarget = Boolean(b.target_host),
+    targetHost = hasTarget
+      ? text(b.target_host, 253, '节点地址')
+      : 'pending.invalid',
+    targetPort = hasTarget ? int(b.target_port, 1, 65535, '节点端口') : 1,
+    protocol = hasTarget ? b.protocol : 'TCP';
+  assert(['TCP', 'UDP'].includes(protocol), '无效的隧道协议');
+  const targetIp = hasTarget ? await resolveTarget(targetHost) : '0.0.0.0';
   const own = await rows('SELECT host FROM lines');
   assert(
     !own.some((x) => x.host === targetHost || x.host === targetIp),
@@ -134,9 +139,8 @@ export async function createOrder(req: Request, u: User, b: any) {
     409,
   );
   let relay = await one(
-    'SELECT * FROM relays WHERE user_id=? AND line_id=?',
+    'SELECT * FROM relays WHERE user_id=? ORDER BY expires_at DESC,created_at DESC LIMIT 1',
     u.id,
-    line.id,
   );
   if (relay) {
     assert(
@@ -145,12 +149,19 @@ export async function createOrder(req: Request, u: User, b: any) {
       409,
     );
     assert(
-      relay.target_host === targetHost &&
-        relay.target_port === targetPort &&
-        relay.protocol === b.protocol,
-      '同一线路已有绑定节点，请在订单页续费；更换节点请提交工单',
+      relay.line_id === line.id,
+      '当前账号已有套餐；续费请选择原线路，换线请提交工单',
       409,
     );
+    if (hasTarget)
+      await stmt(
+        "UPDATE relays SET target_host=?,target_ip=?,target_port=?,protocol=?,suspended=0,revision=revision+1,reported_state='pending' WHERE id=?",
+        targetHost,
+        targetIp,
+        targetPort,
+        protocol,
+        relay.id,
+      ).run();
   } else {
     const used = new Set(
       (
@@ -168,7 +179,7 @@ export async function createOrder(req: Request, u: User, b: any) {
           targetHost,
           targetIp,
           targetPort,
-          b.protocol,
+          protocol,
           port,
           plan.speed_mbps,
           now(),
@@ -178,22 +189,12 @@ export async function createOrder(req: Request, u: User, b: any) {
         if (!String(e).includes('UNIQUE')) throw e;
       }
     }
-    relay = await one(
-      'SELECT * FROM relays WHERE user_id=? AND line_id=?',
-      u.id,
-      line.id,
-    );
+    relay = await one('SELECT * FROM relays WHERE user_id=?', u.id);
     assert(relay, '当前线路端口已用完', 409);
   }
-  assert(
-    relay.target_host === targetHost &&
-      relay.target_port === targetPort &&
-      relay.protocol === b.protocol,
-    '节点绑定冲突，请刷新重试',
-    409,
-  );
+  assert(relay.line_id === line.id, '套餐线路冲突，请刷新重试', 409);
   const channel = plan.price_cents === 0 ? 'free' : b.channel;
-  assert(plan.trial || plan.price_cents > 0, '收费套餐尚未设置价格');
+  assert(plan.price_cents >= 0, '套餐价格无效');
   assert(
     channel === 'free' ||
       (channel === 'alipay' && s.epay_alipay) ||
@@ -203,7 +204,7 @@ export async function createOrder(req: Request, u: User, b: any) {
   const provider = channel === 'free' ? 'free' : gateway(s) + '#' + s.epay_pid;
   const orderId = 'MS' + id();
   await stmt(
-    "INSERT INTO orders(id,user_id,relay_id,plan_id,name,days,price_cents,speed_mbps,trial,channel,provider_id,created_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM orders WHERE user_id=? AND status='pending') AND EXISTS(SELECT 1 FROM users WHERE id=? AND (?=0 OR trial_used=0))",
+    "INSERT INTO orders(id,user_id,relay_id,plan_id,name,days,price_cents,speed_mbps,traffic_gb,trial,channel,provider_id,created_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM orders WHERE user_id=? AND status='pending') AND EXISTS(SELECT 1 FROM users WHERE id=? AND (?=0 OR trial_used=0))",
     orderId,
     u.id,
     relay.id,
@@ -212,6 +213,7 @@ export async function createOrder(req: Request, u: User, b: any) {
     plan.days,
     plan.price_cents,
     plan.speed_mbps,
+    plan.traffic_gb,
     plan.trial,
     channel,
     provider,

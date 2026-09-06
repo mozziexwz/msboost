@@ -23,6 +23,7 @@ import {
   InputOTPSlot,
 } from '@/components/ui/input-otp';
 import { AlertCircle, LoaderCircle, ShieldCheck } from 'lucide-react';
+import Markdown from './markdown';
 export async function api(path: string, body?: unknown): Promise<any> {
   const r = await fetch('/api/' + path, {
     method: body === undefined ? 'GET' : 'POST',
@@ -200,11 +201,13 @@ export function AuthDialog({
   onClose,
   onSuccess,
   settings,
+  articles = [],
 }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
   settings: any;
+  articles?: any[];
 }) {
   const [mode, setMode] = useState<'login' | 'register' | 'reset' | 'setup'>(
       'login',
@@ -221,7 +224,8 @@ export function AuthDialog({
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [success, setSuccess] = useState(''),
-    [count, setCount] = useState(0);
+    [count, setCount] = useState(0),
+    [policyOpen, setPolicyOpen] = useState(false);
   const needsEmailCode =
     mode === 'reset' ||
     (mode === 'register' && settings.register_email_verification !== false);
@@ -237,6 +241,10 @@ export function AuthDialog({
     setReset((x) => x + 1);
     setError('');
     setSuccess('');
+    if (m === 'register') {
+      setAgreed(false);
+      setPolicyOpen(true);
+    }
   }
   async function send() {
     if (settings.turnstile_enabled && action !== 'email') {
@@ -325,7 +333,7 @@ export function AuthDialog({
           </DialogTitle>
           <DialogDescription>
             {mode === 'register'
-              ? '客户注册仅支持 QQ 邮箱'
+              ? '普通用户仅支持数字 QQ 邮箱'
               : '客户使用 QQ 邮箱；管理员可使用指定邮箱'}
             {mode === 'register' && settings.invite_required
               ? ' · 当前需邀请码'
@@ -340,7 +348,7 @@ export function AuthDialog({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder={
-                mode === 'register' ? 'yourname@qq.com' : '请输入登录邮箱'
+                mode === 'register' ? '123456@qq.com' : '请输入登录邮箱'
               }
               required
             />
@@ -417,13 +425,21 @@ export function AuthDialog({
             </>
           )}
           {mode === 'register' && (
-            <label className="check-line">
+            <div className="check-line">
               <Checkbox
                 checked={agreed}
                 onCheckedChange={(v) => setAgreed(Boolean(v))}
               />
-              我已阅读并同意服务协议及隐私政策
-            </label>
+              <button
+                type="button"
+                className="text-link"
+                onClick={() => setPolicyOpen(true)}
+              >
+                {agreed
+                  ? '已阅读并同意服务协议及隐私政策'
+                  : '阅读服务协议并确认'}
+              </button>
+            </div>
           )}
           {mode !== 'setup' && settings.turnstile_enabled && (
             <Captcha
@@ -443,6 +459,7 @@ export function AuthDialog({
             type="submit"
             disabled={
               busy ||
+              (mode === 'register' && !agreed) ||
               (needsEmailCode && !settings.mail_ready) ||
               (mode !== 'setup' && settings.turnstile_enabled && !token)
             }
@@ -484,6 +501,35 @@ export function AuthDialog({
             {mode === 'reset' ? '返回登录' : '忘记密码'}
           </button>
         </div>
+        <Dialog open={policyOpen} onOpenChange={setPolicyOpen}>
+          <DialogContent className="article-dialog">
+            <DialogHeader>
+              <DialogTitle>注册前请确认服务协议</DialogTitle>
+              <DialogDescription>
+                SSH 与系统重装属于高风险操作，请完整阅读后继续。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="policy-scroll">
+              {articles
+                .filter((a: any) => ['terms', 'privacy'].includes(a.id))
+                .map((a: any) => (
+                  <section key={a.id}>
+                    <h3>{a.title}</h3>
+                    <Markdown body={a.body} />
+                  </section>
+                ))}
+            </div>
+            <Button
+              type="button"
+              onClick={() => {
+                setAgreed(true);
+                setPolicyOpen(false);
+              }}
+            >
+              我已阅读并同意
+            </Button>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

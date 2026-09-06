@@ -9,6 +9,14 @@ command -v systemctl >/dev/null
 export DEBIAN_FRONTEND=noninteractive
 echo 'MSBOOST_STAGE=dependencies'
 echo 'MSBOOST_EVENT=正在安装依赖和时间同步服务'
+# A repeated deployment is a replacement. Remove both the current MSBOOST
+# service and names used by older releases before installing the new node.
+systemctl disable --now msboost-node.service 2>/dev/null || true
+systemctl disable --now msboost-mieru.service 2>/dev/null || true
+rm -f -- /etc/systemd/system/msboost-node.service /etc/systemd/system/msboost-mieru.service
+rm -rf -- /etc/msboost-node /etc/msboost-mieru
+rm -f -- /usr/local/lib/msboost/core /usr/local/lib/msboost/mihomo
+systemctl daemon-reload
 apt-get update -qq >/dev/null
 apt-get install -y -qq chrony tzdata ca-certificates curl gzip iproute2 >/dev/null
 echo 'MSBOOST_STAGE=clock'
@@ -22,7 +30,7 @@ if command -v hwclock >/dev/null; then
 fi
 echo 'MSBOOST_EVENT=系统时间已同步，UTC+8'
 install -d -m 0755 /usr/local/lib/msboost
-install -d -m 0700 /etc/msboost-mieru /etc/msboost-mieru/ruleset
+install -d -m 0700 /etc/msboost-node /etc/msboost-node/ruleset
 TEMP_DIR=$(mktemp -d /run/msboost-install.XXXXXX)
 BIN_DIR=''
 cleanup() {
@@ -49,14 +57,14 @@ for _ in $(seq 1 100); do
   if [[ -z "$(ss -H -ltn "sport = :$CANDIDATE")" ]]; then PORT=$CANDIDATE; break; fi
 done
 [[ -n "$PORT" ]] || { echo 'MSBOOST_ERROR=没有可用 TCP 端口'; exit 1; }
-NODE_USER="mieru-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+NODE_USER="${MSBOOST_PROFILE_NAME:-msboost}"
 NODE_PASS="$(od -An -N20 -tx1 /dev/urandom | tr -d ' \n')"
 cat > "$TEMP_DIR/config.yaml" <<EOF
 mode: rule
 log-level: warning
 find-process-mode: off
 listeners:
-  - name: mieru-in
+  - name: msboost-in
     type: mieru
     listen: 0.0.0.0
     port: $PORT
@@ -68,42 +76,53 @@ rule-providers:
     type: http
     behavior: domain
     format: mrs
-    path: /etc/msboost-mieru/ruleset/gfw.mrs
+    path: /etc/msboost-node/ruleset/gfw.mrs
     url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/gfw.mrs
     interval: 86400
 rules:
+  - DOMAIN-SUFFIX,gtop100.com,DIRECT
+  - DOMAIN-SUFFIX,nexon.com,DIRECT
+  - DOMAIN-SUFFIX,nexon.net,DIRECT
+  - DOMAIN-SUFFIX,nexon.co.kr,DIRECT
+  - DOMAIN-SUFFIX,maplestory.com,DIRECT
+  - DOMAIN-SUFFIX,maplestory.net,DIRECT
+  - DOMAIN-SUFFIX,maplestory.nexon.com,DIRECT
+  - DOMAIN-SUFFIX,maplestory.nexon.net,DIRECT
+  - DOMAIN-SUFFIX,maplestorym.nexon.com,DIRECT
+  - DOMAIN-SUFFIX,steampowered.com,DIRECT
+  - DOMAIN-SUFFIX,steamcommunity.com,DIRECT
+  - DOMAIN-SUFFIX,steamgames.com,DIRECT
+  - DOMAIN-SUFFIX,steamusercontent.com,DIRECT
+  - DOMAIN-SUFFIX,steamcontent.com,DIRECT
+  - DOMAIN-SUFFIX,steamstatic.com,DIRECT
+  - DOMAIN-SUFFIX,akamaihd.net,DIRECT
+  - DOMAIN-SUFFIX,discord.com,DIRECT
+  - DOMAIN-SUFFIX,discord.gg,DIRECT
+  - DOMAIN-SUFFIX,discordapp.com,DIRECT
+  - DOMAIN-SUFFIX,discordapp.net,DIRECT
   - RULE-SET,gfw-block,REJECT
   - MATCH,DIRECT
 EOF
-install -m 0600 "$TEMP_DIR/gfw.mrs" /etc/msboost-mieru/ruleset/gfw.mrs
+install -m 0600 "$TEMP_DIR/gfw.mrs" /etc/msboost-node/ruleset/gfw.mrs
 echo 'MSBOOST_STAGE=config_check'
-"$BIN_DIR/mihomo" -d /etc/msboost-mieru -f "$TEMP_DIR/config.yaml" -t >/dev/null 2>&1
-WAS_ACTIVE=0
-systemctl is-active --quiet msboost-mieru.service && WAS_ACTIVE=1
-[[ -f /etc/msboost-mieru/config.yaml ]] && cp -p /etc/msboost-mieru/config.yaml "$TEMP_DIR/old-config" || true
-[[ -f /usr/local/lib/msboost/mihomo ]] && cp -p /usr/local/lib/msboost/mihomo "$BIN_DIR/old-bin" || true
+"$BIN_DIR/mihomo" -d /etc/msboost-node -f "$TEMP_DIR/config.yaml" -t >/dev/null 2>&1
 rollback() {
   trap - ERR
-  if [[ -f "$TEMP_DIR/old-config" && -f "$BIN_DIR/old-bin" ]]; then
-    install -m 0600 "$TEMP_DIR/old-config" /etc/msboost-mieru/config.yaml
-    install -m 0755 "$BIN_DIR/old-bin" /usr/local/lib/msboost/mihomo
-    (( WAS_ACTIVE == 0 )) || systemctl restart msboost-mieru.service || true
-  else systemctl stop msboost-mieru.service || true; fi
-  echo 'MSBOOST_ERROR=Mieru 检查失败，已停止新服务或尝试恢复旧配置'
+  systemctl stop msboost-node.service 2>/dev/null || true
+  echo 'MSBOOST_ERROR=MSBOOST 节点检查失败，已停止新服务'
 }
 trap 'rollback' ERR
-echo 'MSBOOST_EVENT=正在安装独立的 msboost-mieru 服务'
+echo 'MSBOOST_EVENT=正在安装独立的 msboost-node 服务'
 echo 'MSBOOST_STAGE=service_start'
-systemctl stop msboost-mieru.service 2>/dev/null || true
-install -m 0755 "$BIN_DIR/mihomo" /usr/local/lib/msboost/mihomo
-install -m 0600 "$TEMP_DIR/config.yaml" /etc/msboost-mieru/config.yaml
-cat > /etc/systemd/system/msboost-mieru.service <<'EOF'
+install -m 0755 "$BIN_DIR/mihomo" /usr/local/lib/msboost/core
+install -m 0600 "$TEMP_DIR/config.yaml" /etc/msboost-node/config.yaml
+cat > /etc/systemd/system/msboost-node.service <<'EOF'
 [Unit]
-Description=MSBOOST Mieru inbound with GFW domain deny list
+Description=MSBOOST game node
 After=network-online.target chrony.service
 Wants=network-online.target
 [Service]
-ExecStart=/usr/local/lib/msboost/mihomo -d /etc/msboost-mieru -f /etc/msboost-mieru/config.yaml
+ExecStart=/usr/local/lib/msboost/core -d /etc/msboost-node -f /etc/msboost-node/config.yaml
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
@@ -113,9 +132,9 @@ UMask=0077
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable --now msboost-mieru.service >/dev/null 2>&1
+systemctl enable --now msboost-node.service >/dev/null 2>&1
 sleep 2
-if ! systemctl is-active --quiet msboost-mieru.service; then rollback; exit 1; fi
+if ! systemctl is-active --quiet msboost-node.service; then rollback; exit 1; fi
 echo 'MSBOOST_STAGE=selftest'
 TEST_PORT=''
 for _ in $(seq 1 100); do
@@ -143,7 +162,7 @@ proxies:
 rules:
   - MATCH,node
 EOF
-/usr/local/lib/msboost/mihomo -d "$TEMP_DIR" -f "$TEMP_DIR/test.yaml" >/dev/null 2>&1 &
+/usr/local/lib/msboost/core -d "$TEMP_DIR" -f "$TEMP_DIR/test.yaml" >/dev/null 2>&1 &
 TEST_PID=$!
 trap 'kill "$TEST_PID" 2>/dev/null || true; cleanup' EXIT
 sleep 1
@@ -152,7 +171,7 @@ kill "$TEST_PID" 2>/dev/null || true
 trap cleanup EXIT
 echo 'MSBOOST_STAGE=result'
 cat > "/run/msboost-result-${MSBOOST_JOB_ID}.json" <<EOF
-{"profiles":[{"profileName":"default","user":{"name":"$NODE_USER","password":"$NODE_PASS"},"servers":[{"ipAddress":"$MSBOOST_PUBLIC_IP","domainName":"","portBindings":[{"port":$PORT,"protocol":"TCP"}]}],"mtu":1400}],"activeProfile":"default","rpcPort":8964,"socks5Port":1080,"loggingLevel":"INFO"}
+{"profiles":[{"profileName":"$NODE_USER","user":{"name":"$NODE_USER","password":"$NODE_PASS"},"servers":[{"ipAddress":"$MSBOOST_PUBLIC_IP","domainName":"","portBindings":[{"port":$PORT,"protocol":"TCP"}]}],"mtu":1400}],"activeProfile":"$NODE_USER","rpcPort":8964,"socks5Port":6666,"loggingLevel":"INFO"}
 EOF
-echo 'MSBOOST_EVENT=Mieru 本机端到端验证通过'
+echo 'MSBOOST_EVENT=MSBOOST 节点本机端到端验证通过'
 echo "MSBOOST_PORT=$PORT"

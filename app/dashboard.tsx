@@ -64,6 +64,7 @@ import {
   api,
   AuthDialog,
   Empty,
+  Field,
   Loading,
   Notice,
   Picker,
@@ -73,13 +74,13 @@ import {
 import VpsTools from './vps-tools';
 import AdminPanel from './admin-panel';
 import Support from './support';
+import Markdown from './markdown';
 const links = [
-  { id: 'relay', icon: LayoutDashboard, label: '转发控制台' },
+  { id: 'guides', icon: BookOpen, label: '教程（必看）' },
+  { id: 'vps', icon: Terminal, label: 'VPS 节点部署' },
   { id: 'orders', icon: Wallet, label: '套餐与订单' },
-  { id: 'status', icon: Activity, label: '线路状态' },
-  { id: 'vps', icon: Terminal, label: 'VPS 工具' },
+  { id: 'relay', icon: LayoutDashboard, label: '隧道中转' },
   { id: 'tickets', icon: Headphones, label: '我的工单' },
-  { id: 'guides', icon: BookOpen, label: '使用指南' },
 ];
 const stateLabels: Record<string, string> = {
   pending: '等待处理',
@@ -98,6 +99,7 @@ function relayReady(r: any) {
   return (
     !r.suspended &&
     r.expires_at > Date.now() / 1000 &&
+    (!r.traffic_limit_bytes || r.traffic_used_bytes < r.traffic_limit_bytes) &&
     r.reported_state === 'active' &&
     r.reported_revision === r.revision &&
     r.reported_at > Date.now() / 1000 - 120 &&
@@ -156,6 +158,9 @@ export default function Dashboard() {
     myRelays = data?.relays || [],
     liveRelays = myRelays.filter(
       (r: any) => r.expires_at > Date.now() / 1000 && !r.suspended,
+    ),
+    activeSubscription = myRelays.find(
+      (r: any) => r.expires_at > Date.now() / 1000,
     );
   function navigate(v: string) {
     setView(v);
@@ -230,9 +235,9 @@ export default function Dashboard() {
       context.registerTool(
         {
           name: 'msboost_import_mieru_config',
-          title: '导入 Mieru 配置',
+          title: '导入 MSBOOST 直连配置',
           description:
-            '在当前已登录浏览器解析 Mieru JSON 并选择节点；不创建订单。已有有效转发套餐时会自动加密保存转换后的配置。',
+            '在当前已登录浏览器解析 MSBOOST JSON 并选择节点；不创建订单。已有有效套餐时会自动加密保存转换后的配置。',
           inputSchema: {
             type: 'object',
             properties: { json: { type: 'string', maxLength: 131072 } },
@@ -260,7 +265,7 @@ export default function Dashboard() {
       setAuth(true);
       return;
     }
-    if (!target || !line || !plan) return;
+    if (!line || !plan) return;
     setBusy(true);
     setError('');
     setSuccess('');
@@ -268,17 +273,35 @@ export default function Dashboard() {
       const o = await api('orders', {
         line_id: line.id,
         plan_id: plan.id,
-        target_host: target.host,
-        target_port: target.port,
-        protocol: target.protocol,
         channel,
       });
       await refresh();
       navigate('orders');
       setSuccess(
         o.paid
-          ? '体验套餐已开通，正在为你建立转发。'
+          ? '套餐已开通，请上传直连配置并绑定节点。'
           : '订单已创建，请在订单列表完成支付。',
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function bindTunnel() {
+    if (!activeSubscription || !parsed || !target) return;
+    setBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      await api('relays/bind', {
+        relay_id: activeSubscription.id,
+        source: JSON.stringify(parsed.config),
+        target_key: target.key,
+      });
+      await refresh();
+      setSuccess(
+        '节点已绑定，旧目标和旧配置已立即失效；线路服务器正在应用新配置。',
       );
     } catch (e) {
       setError((e as Error).message);
@@ -342,7 +365,7 @@ export default function Dashboard() {
       if (!r.config_saved && (!parsed || !t)) {
         navigate('relay');
         setError(
-          '转发配置尚未保存，请导入对应原始 Mieru 配置生成。付费配置加密保存，到期自动清理。',
+          '中转配置尚未保存，请导入对应直连配置生成。付费配置加密保存，到期自动清理。',
         );
         return;
       }
@@ -356,7 +379,7 @@ export default function Dashboard() {
       );
       downloadJson(
         saved,
-        front ? 'msboost-front-mieru.json' : 'msboost-mieru.json',
+        front ? `${r.line_name}-前置.json` : `${r.line_name}.json`,
       );
       await refresh();
     } catch (e) {
@@ -418,14 +441,13 @@ export default function Dashboard() {
               ))}
           </div>
         </div>
-        <p className="login-footer">
-          © {new Date().getFullYear()} MSBOOST
-        </p>
+        <p className="login-footer">© {new Date().getFullYear()} MSBOOST</p>
         <AuthDialog
           open={auth}
           onClose={() => setAuth(false)}
           onSuccess={refresh}
           settings={settings}
+          articles={data.articles || []}
         />
         <ArticleDialog article={article} onClose={() => setArticle(null)} />
       </main>
@@ -433,7 +455,7 @@ export default function Dashboard() {
   const title =
     view === 'admin'
       ? '管理后台'
-      : links.find((l) => l.id === view)?.label || '转发控制台';
+      : links.find((l) => l.id === view)?.label || '隧道中转';
   return (
     <SidebarProvider
       style={{ '--sidebar-width': '15.5rem' } as React.CSSProperties}
@@ -516,13 +538,13 @@ export default function Dashboard() {
               </h1>
               <p className="muted">
                 {view === 'relay'
-                  ? '上传 Mieru 配置，选择优化线路，开始你的下一场游戏。'
+                  ? '先购买套餐，再上传直连配置建立游戏隧道。'
                   : view === 'orders'
                     ? '管理有效期、订单与配置下载。'
                     : 'MSBOOST · 你的专属线路工作空间'}
               </p>
             </div>
-            <button className="pill" onClick={() => navigate('status')}>
+            <button className="pill" onClick={() => navigate('relay')}>
               <Radio size={14} />
               {(data.lines || []).filter(online).length} 条线路在线
             </button>
@@ -566,7 +588,7 @@ export default function Dashboard() {
                     免费
                     <ArrowUpRight size={25} />
                   </strong>
-                  <p>重装系统 / 部署 Mieru / 自动校时</p>
+                  <p>重装系统 / 部署 MSBOOST 节点 / 自动校时</p>
                 </button>
               </div>
               <div className="work-grid">
@@ -612,7 +634,7 @@ export default function Dashboard() {
                       {parsed ? <Check size={28} /> : <CloudUpload size={28} />}
                     </span>
                     <strong>
-                      {parsed ? '配置已识别' : '拖入你的 Mieru 配置文件'}
+                      {parsed ? '配置已识别' : '拖入你的 MSBOOST 直连配置'}
                     </strong>
                     <p>
                       {parsed
@@ -643,130 +665,33 @@ export default function Dashboard() {
                     </span>
                   </div>
                   <div className="panel-divider" />
-                  <div className="subheading">
-                    <h3>选择一条线路</h3>
-                    <span>独立端口 · 独立限速</span>
-                  </div>
-                  {!data.lines?.filter((l: any) => l.enabled).length ? (
+                  {!activeSubscription ? (
                     <Empty
-                      title="线路正在准备中"
-                      body="管理员接入转发服务器后，在这里查看可用线路和价格。"
+                      title="请先购买套餐"
+                      body="购买有效天数后，才能上传并绑定节点配置。"
                     />
                   ) : (
-                    <RadioGroup
-                      value={lineId}
-                      onValueChange={setLineId}
-                      className="line-options"
-                    >
-                      {data.lines
-                        .filter((l: any) => l.enabled)
-                        .map((l: any) => (
-                          <label
-                            key={l.id}
-                            className={`line-option ${lineId === l.id ? 'selected' : ''}`}
-                          >
-                            <RadioGroupItem
-                              value={l.id}
-                              disabled={!online(l)}
-                            />
-                            <span className="line-symbol">
-                              <Globe2 size={19} />
-                            </span>
-                            <span>
-                              <b>{l.name}</b>
-                              <small>
-                                {l.region} · {l.description || 'Mieru 转发线路'}
-                                {l.requires_front ? ' · 必须自备前置机' : ''}
-                              </small>
-                            </span>
-                            <span
-                              className={`line-state ${online(l) ? 'good' : ''}`}
-                            >
-                              {online(l) ? '在线' : '状态过期'}
-                            </span>
-                          </label>
-                        ))}
-                    </RadioGroup>
-                  )}
-                  {line && (
-                    <>
-                      <div className="subheading mt-6">
-                        <h3>选择有效期</h3>
-                        <span>可在后台调整套餐</span>
-                      </div>
-                      <RadioGroup
-                        value={planId}
-                        onValueChange={setPlanId}
-                        className="plan-options"
+                    <div className="checkout-row">
+                      <span>
+                        {activeSubscription.line_name} · 有效至{' '}
+                        {stamp(activeSubscription.expires_at)}
+                        <small>更换目标会让旧 IP、旧端口和旧配置立即失效</small>
+                      </span>
+                      <Button
+                        disabled={busy || !parsed || !target}
+                        onClick={bindTunnel}
                       >
-                        {data.plans.map((p: any) => (
-                          <label
-                            key={p.id}
-                            className={`plan-option ${planId === p.id ? 'selected' : ''}`}
-                          >
-                            <RadioGroupItem
-                              value={p.id}
-                              disabled={p.trial && user.trial_used}
-                            />
-                            <span>
-                              <b>{p.name}</b>
-                              <small>
-                                {p.days} 天 · {p.speed_mbps} Mbps
-                                {p.trial ? ' · 限一次' : ''}
-                              </small>
-                            </span>
-                            <strong>
-                              {p.trial ? '免费' : money(p.price_cents)}
-                            </strong>
-                          </label>
-                        ))}
-                      </RadioGroup>
-                      {!data.plans.length && (
-                        <Empty
-                          title="套餐尚未上架"
-                          body="管理员设置价格后即可购买。"
-                        />
-                      )}
-                      {plan && !plan.trial && (
-                        <div className="mt-5">
-                          <Picker
-                            value={channel}
-                            onChange={setChannel}
-                            options={[
-                              ...(settings.epay_alipay
-                                ? [{ value: 'alipay', label: '支付宝' }]
-                                : []),
-                              ...(settings.epay_wxpay
-                                ? [{ value: 'wxpay', label: '微信支付' }]
-                                : []),
-                            ]}
-                          />
-                        </div>
-                      )}
-                      <div className="checkout-row">
-                        <span>
-                          {plan
-                            ? `${plan.days} 天 · 每方向 ${plan.speed_mbps} Mbps`
-                            : '请选择套餐'}
-                          <small>同一线路剩余超过 30 天时暂不能续购</small>
-                        </span>
-                        <Button
-                          disabled={
-                            busy ||
-                            !target ||
-                            !plan ||
-                            !settings.terms_confirmed
-                          }
-                          onClick={order}
-                        >
-                          {plan?.trial ? '领取免费体验' : '创建订单'}
-                          <ArrowRight size={16} />
-                        </Button>
-                      </div>
-                      {!settings.terms_confirmed && (
-                        <p className="setup-hint">管理员尚未开放套餐销售。</p>
-                      )}
-                    </>
+                        保存并应用隧道 <ArrowRight size={16} />
+                      </Button>
+                    </div>
+                  )}
+                  {!activeSubscription && (
+                    <Button
+                      variant="outline"
+                      onClick={() => navigate('orders')}
+                    >
+                      前往购买套餐
+                    </Button>
                   )}
                 </section>
                 <aside className="right-rail">
@@ -779,7 +704,7 @@ export default function Dashboard() {
                       {
                         icon: Server,
                         title: '你的 VPS',
-                        sub: '保留现有 Mieru 节点',
+                        sub: '保留现有 MSBOOST 节点',
                       },
                       {
                         icon: MapleIcon,
@@ -789,7 +714,7 @@ export default function Dashboard() {
                       {
                         icon: Download,
                         title: '下载转发配置',
-                        sub: '导入 Mieru 客户端使用',
+                        sub: '导入兼容客户端使用',
                       },
                     ].map(({ icon: Icon, title, sub }, i) => (
                       <div key={title}>
@@ -810,10 +735,10 @@ export default function Dashboard() {
                   </section>
                   <section className="help-card">
                     <Terminal size={23} />
-                    <h3>还没有 Mieru 节点？</h3>
-                    <p>使用 VPS 工具，完成节点部署和 UTC+8 时间同步。</p>
+                    <h3>还没有 MSBOOST 节点？</h3>
+                    <p>使用 VPS 节点部署，完成安装和 UTC+8 时间同步。</p>
                     <Button variant="outline" onClick={() => navigate('vps')}>
-                      打开 VPS 工具
+                      打开 VPS 节点部署
                       <ArrowRight size={16} />
                     </Button>
                   </section>
@@ -832,15 +757,80 @@ export default function Dashboard() {
             <div className="section-stack">
               <section className="panel">
                 <div className="subheading">
+                  <h2>购买套餐</h2>
+                  <span>先购买有效天数，再配置隧道</span>
+                </div>
+                <div className="form-grid mt-5">
+                  <Field label="选择线路">
+                    <Picker
+                      value={lineId}
+                      onChange={setLineId}
+                      options={data.lines
+                        .filter((l: any) => l.enabled && online(l))
+                        .map((l: any) => ({
+                          value: l.id,
+                          label: `${l.name} · ${l.region}${l.requires_front ? ' · 需前置机' : ''}`,
+                        }))}
+                    />
+                  </Field>
+                  <Field label="选择套餐">
+                    <Picker
+                      value={planId}
+                      onChange={setPlanId}
+                      options={data.plans
+                        .filter((p: any) => !(p.trial && user.trial_used))
+                        .map((p: any) => ({
+                          value: p.id,
+                          label: `${p.name} · ${p.days} 天 · ${p.traffic_gb ? p.traffic_gb + ' GB' : '不限流量'} · ${p.price_cents === 0 ? '免费' : money(p.price_cents)}`,
+                        }))}
+                    />
+                  </Field>
+                </div>
+                {plan && plan.price_cents > 0 && (
+                  <div className="mt-5">
+                    <Picker
+                      value={channel}
+                      onChange={setChannel}
+                      options={[
+                        ...(settings.epay_alipay
+                          ? [{ value: 'alipay', label: '支付宝' }]
+                          : []),
+                        ...(settings.epay_wxpay
+                          ? [{ value: 'wxpay', label: '微信支付' }]
+                          : []),
+                      ]}
+                    />
+                  </div>
+                )}
+                <div className="checkout-row">
+                  <span>
+                    {plan
+                      ? `${plan.days} 天 · ${plan.speed_mbps} Mbps · ${plan.traffic_gb ? plan.traffic_gb + ' GB' : '不限流量'}`
+                      : '请选择线路和套餐'}
+                    <small>套餐最长 31 天；新套餐流量覆盖原额度，不叠加</small>
+                  </span>
+                  <Button
+                    disabled={
+                      busy || !line || !plan || !settings.terms_confirmed
+                    }
+                    onClick={order}
+                  >
+                    {plan?.price_cents === 0 ? '立即领取' : '创建订单'}
+                    <ArrowRight size={16} />
+                  </Button>
+                </div>
+              </section>
+              <section className="panel">
+                <div className="subheading">
                   <h2>我的转发</h2>
                   <Button variant="outline" onClick={() => navigate('relay')}>
-                    创建 / 续费
+                    配置隧道
                   </Button>
                 </div>
                 {!myRelays.length ? (
                   <Empty
                     title="还没有转发"
-                    body="上传你的 Mieru 配置并选择一条线路。"
+                    body="先购买套餐，再上传直连配置建立隧道。"
                   />
                 ) : (
                   <Table>
@@ -869,19 +859,27 @@ export default function Dashboard() {
                           <TableCell className="mono">
                             {r.relay_host}:{r.listen_port}
                             <small>
-                              {r.protocol} · {r.speed_mbps} Mbps
+                              {r.protocol} · {r.speed_mbps} Mbps ·{' '}
+                              {r.traffic_limit_bytes
+                                ? `${(r.traffic_used_bytes / 1073741824).toFixed(2)} / ${(r.traffic_limit_bytes / 1073741824).toFixed(0)} GB`
+                                : '不限流量'}
                             </small>
                           </TableCell>
                           <TableCell>{stamp(r.expires_at)}</TableCell>
                           <TableCell>
-                            {r.suspended
-                              ? '已暂停'
-                              : r.expires_at < Date.now() / 1000
-                                ? '已到期'
-                                : relayReady(r)
-                                  ? '转发中'
-                                  : stateLabels[r.reported_state] ||
-                                    '等待线路确认'}
+                            {r.traffic_limit_bytes &&
+                            r.traffic_used_bytes >= r.traffic_limit_bytes
+                              ? '流量已用尽'
+                              : r.suspended
+                                ? r.target_ip === '0.0.0.0'
+                                  ? '等待绑定节点'
+                                  : '已暂停'
+                                : r.expires_at < Date.now() / 1000
+                                  ? '已到期'
+                                  : relayReady(r)
+                                    ? '转发中'
+                                    : stateLabels[r.reported_state] ||
+                                      '等待线路确认'}
                             {r.last_error && (
                               <small className="text-red-600">
                                 {r.last_error}
@@ -1010,11 +1008,11 @@ export default function Dashboard() {
               </section>
             </div>
           )}
-          {view === 'status' && (
+          {view === 'relay' && (
             <div className="section-stack">
               <section className="panel">
                 <div className="subheading">
-                  <h2>线路状态</h2>
+                  <h2>线路状态与实时质量</h2>
                   <span>每 20 秒刷新</span>
                 </div>
                 <p className="muted">
@@ -1102,6 +1100,15 @@ export default function Dashboard() {
               onLogin={() => setAuth(true)}
             />
           )}
+          {view === 'relay' && activeSubscription && (
+            <VpsTools
+              user={user}
+              settings={settings}
+              relays={myRelays}
+              onLogin={() => setAuth(true)}
+              frontOnly
+            />
+          )}
           {view === 'tickets' && (
             <Support user={user} onLogin={() => setAuth(true)} />
           )}
@@ -1173,7 +1180,9 @@ function ArticleDialog({
           <DialogTitle>{article?.title}</DialogTitle>
           <DialogDescription>MSBOOST 服务信息</DialogDescription>
         </DialogHeader>
-        <div className="prose article-body">{article?.body}</div>
+        <div className="prose article-body">
+          <Markdown body={article?.body || ''} />
+        </div>
       </DialogContent>
     </Dialog>
   );

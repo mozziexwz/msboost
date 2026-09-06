@@ -1,5 +1,17 @@
 import { assert, now } from './core';
-import { audit, db, env, hash, rows, stmt, type User } from './server';
+import {
+  audit,
+  db,
+  decrypt,
+  encrypt,
+  env,
+  hash,
+  rows,
+  settings,
+  stmt,
+  workerFetch,
+  type User,
+} from './server';
 
 const TABLES = {
   settings: ['key', 'value'],
@@ -35,6 +47,7 @@ const TABLES = {
     'token_hash',
     'heartbeat_at',
     'probe_label',
+    'probe_ip',
     'rtt_ms',
     'loss_pct',
     'cpu_pct',
@@ -48,6 +61,7 @@ const TABLES = {
     'days',
     'price_cents',
     'speed_mbps',
+    'traffic_gb',
     'trial',
     'enabled',
     'sort',
@@ -64,6 +78,8 @@ const TABLES = {
     'listen_port',
     'expires_at',
     'speed_mbps',
+    'traffic_limit_bytes',
+    'traffic_used_bytes',
     'suspended',
     'revision',
     'reported_state',
@@ -81,6 +97,7 @@ const TABLES = {
     'days',
     'price_cents',
     'speed_mbps',
+    'traffic_gb',
     'trial',
     'status',
     'channel',
@@ -117,6 +134,18 @@ const TABLES = {
   config_files: ['relay_id', 'object_key', 'created_at'],
   fronts: ['relay_id', 'host', 'port', 'job_id', 'created_at'],
   audit_logs: ['id', 'actor_id', 'action', 'subject', 'ip', 'created_at'],
+  content_assets: ['id', 'object_key', 'content_type', 'size', 'created_at'],
+  backup_targets: [
+    'id',
+    'name',
+    'host',
+    'port',
+    'username',
+    'remote_path',
+    'credential',
+    'enabled',
+    'created_at',
+  ],
 } as const;
 type BackupTable = keyof typeof TABLES;
 const INSERT_ORDER: BackupTable[] = [
@@ -136,6 +165,8 @@ const INSERT_ORDER: BackupTable[] = [
   'config_files',
   'fronts',
   'audit_logs',
+  'content_assets',
+  'backup_targets',
 ];
 const DELETE_ORDER = [...INSERT_ORDER].reverse();
 
@@ -143,18 +174,24 @@ async function keyId() {
   return (await hash(String(env.APP_ENCRYPTION_KEY || ''))).slice(0, 16);
 }
 export async function createBackup(req: Request, u: User) {
-  const tables: Record<string, unknown[]> = {};
-  for (const name of INSERT_ORDER)
-    tables[name] = await rows(`SELECT ${TABLES[name].join(',')} FROM ${name}`);
+  const result = await backupPayload();
   await audit(
     req,
     u.id,
     'admin.backup.export',
-    String(Object.values(tables).reduce((n, value) => n + value.length, 0)),
+    String(
+      Object.values(result.tables).reduce((n, value) => n + value.length, 0),
+    ),
   );
+  return result;
+}
+export async function backupPayload() {
+  const tables: Record<string, unknown[]> = {};
+  for (const name of INSERT_ORDER)
+    tables[name] = await rows(`SELECT ${TABLES[name].join(',')} FROM ${name}`);
   return {
     format: 'msboost-backup',
-    version: 1,
+    version: 2,
     created_at: now(),
     key_id: await keyId(),
     scope: ['站点配置', '用户与工单', '转发规则', '订单与财务'],
@@ -162,9 +199,28 @@ export async function createBackup(req: Request, u: User) {
     tables,
   };
 }
+export async function remoteBackup() {
+  const s = await settings(),
+    targets = await rows('SELECT * FROM backup_targets WHERE enabled=1');
+  assert(targets.length, '请先添加并启用备份服务器');
+  const result = await workerFetch(s, '/backup', {
+    filename: `msboost-${new Date().toISOString().replace(/[:.]/g, '-')}.json.enc`,
+    data: await encrypt(JSON.stringify(await backupPayload())),
+    targets: await Promise.all(
+      targets.map(async (t) => ({
+        host: t.host,
+        port: t.port,
+        username: t.username,
+        password: await decrypt(t.credential),
+        remote_path: t.remote_path,
+      })),
+    ),
+  });
+  return { saved: Number(result.saved || 0), total: targets.length };
+}
 function validate(data: any, current: User) {
   assert(
-    data?.format === 'msboost-backup' && data.version === 1,
+    data?.format === 'msboost-backup' && data.version === 2,
     '备份格式或版本不受支持',
   );
   assert(data.key_id && typeof data.key_id === 'string', '备份缺少密钥标识');

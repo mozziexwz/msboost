@@ -72,13 +72,13 @@ def remote_failure(output):
     stages = {
         'dependencies': '安装 APT 依赖失败，请检查软件源、磁盘空间及 apt 锁',
         'clock': '时间同步失败，请检查 chrony、NTP 连通性及系统权限',
-        'binary_download': '下载 Mihomo 失败，请检查 GitHub 连通性及 /usr/local 磁盘空间',
-        'checksum': 'Mihomo 发布文件校验失败，请重试下载',
-        'unpack': '解压 Mihomo 失败，请检查 /usr/local 磁盘空间',
+        'binary_download': '下载 MSBOOST 节点内核失败，请检查 GitHub 连通性及 /usr/local 磁盘空间',
+        'checksum': 'MSBOOST 节点内核校验失败，请重试下载',
+        'unpack': '解压 MSBOOST 节点内核失败，请检查 /usr/local 磁盘空间',
         'rules_download': '下载 GFW 规则失败，请检查 raw.githubusercontent.com 连通性',
-        'config_check': 'Mihomo 配置校验失败，请检查内核兼容性及 /usr/local 是否允许执行',
-        'service_start': 'msboost-mieru 服务启动失败，请检查客户 VPS 上的服务日志',
-        'selftest': 'Mieru 本机端到端测试失败，请检查出站网络和服务状态',
+        'config_check': 'MSBOOST 节点配置校验失败，请检查内核兼容性及 /usr/local 是否允许执行',
+        'service_start': 'msboost-node 服务启动失败，请检查客户 VPS 上的服务日志',
+        'selftest': 'MSBOOST 节点本机端到端测试失败，请检查出站网络和服务状态',
         'result': '生成客户端配置失败，请检查 /run 剩余空间',
     }
     found = [line.removeprefix('MSBOOST_STAGE=') for line in output.decode(errors='replace').splitlines()
@@ -192,8 +192,12 @@ def run_job(data):
         else:
             event(jid, '正在获取固定版本的安装文件并验证发布校验值')
             binary_url, binary_sha = platform_asset(transport, data['kind'])
+            profile_name = str(data.get('profile_name', 'msboost'))
+            if not re.fullmatch(r'[A-Za-z0-9_-]{1,32}', profile_name):
+                profile_name = 'msboost'
             values = {'MSBOOST_JOB_ID': jid, 'MSBOOST_PUBLIC_IP': data['ip'],
-                      'MSBOOST_BINARY_URL': binary_url, 'MSBOOST_BINARY_SHA': binary_sha}
+                      'MSBOOST_BINARY_URL': binary_url, 'MSBOOST_BINARY_SHA': binary_sha,
+                      'MSBOOST_PROFILE_NAME': profile_name}
             if data['kind'] == 'front':
                 front_port = data['front_port']
                 if not isinstance(front_port, int) or not 1024 <= front_port <= 65535:
@@ -222,7 +226,7 @@ def run_job(data):
                 try:
                     with socket.create_connection((data['ip'], port), timeout=8):
                         pass
-                    event(jid, f'公网 TCP/{port} 可达，Mieru 部署完成')
+                    event(jid, f'公网 TCP/{port} 可达，MSBOOST 节点部署完成')
                 except OSError:
                     event(jid, f'本机自测已通过，但公网 TCP/{port} 未连通，请放行云安全组及防火墙')
                 update(jid, config=config, state='completed')
@@ -273,6 +277,55 @@ def send_mail(data):
         smtp.login(config['username'], config['password'])
         smtp.send_message(message)
 
+def send_remote_backup(data):
+    payload = data.get('data', '')
+    filename = data.get('filename', '')
+    targets = data.get('targets', [])
+    if not isinstance(payload, str) or not 1 <= len(payload) <= 8 * 1024 * 1024:
+        raise ValueError('备份数据无效')
+    if not re.fullmatch(r'msboost-[A-Za-z0-9T\-]+\.json\.enc', filename):
+        raise ValueError('备份文件名无效')
+    if not isinstance(targets, list) or not 1 <= len(targets) <= 10:
+        raise ValueError('备份目标无效')
+    saved = 0
+    for target in targets:
+        host, port = str(target.get('host', '')), target.get('port')
+        username, password = str(target.get('username', '')), target.get('password')
+        remote_path = str(target.get('remote_path', ''))
+        if not re.fullmatch(r'[A-Za-z0-9.:-]{1,253}', host) or not isinstance(port, int) or not 1 <= port <= 65535:
+            continue
+        if not re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}\$?', username, re.I) or not isinstance(password, str) or not password:
+            continue
+        if not re.fullmatch(r'/[A-Za-z0-9._/-]{1,180}', remote_path) or '..' in remote_path.split('/'):
+            continue
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        if not addresses or not all(public_ip(item[4][0]) for item in addresses):
+            continue
+        transport = None
+        try:
+            import paramiko
+            transport = paramiko.Transport(socket.create_connection((host, port), timeout=10))
+            transport.start_client(timeout=10)
+            transport.auth_password(username, password, fallback=False)
+            sftp = paramiko.SFTPClient.from_transport(transport)
+            current = ''
+            for part in remote_path.strip('/').split('/'):
+                current += '/' + part
+                try: sftp.mkdir(current, mode=0o700)
+                except OSError: pass
+            final = remote_path.rstrip('/') + '/' + filename
+            temp = final + '.tmp'
+            with sftp.open(temp, 'w') as stream:
+                stream.write(payload)
+            sftp.chmod(temp, 0o600)
+            sftp.rename(temp, final)
+            saved += 1
+        except Exception:
+            pass
+        finally:
+            if transport: transport.close()
+    return saved
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
@@ -304,12 +357,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.response({'error': 'Unauthorized'}, 401)
         try:
             size = int(self.headers.get('Content-Length', '0'))
-            if not 0 < size <= 16384:
+            maximum = 9 * 1024 * 1024 if self.path == '/backup' else 16384
+            if not 0 < size <= maximum:
                 return self.response({'error': '请求过大'}, 413)
             data = json.loads(self.rfile.read(size))
             if self.path == '/mail':
                 send_mail(data)
                 return self.response({'ok': True})
+            if self.path == '/backup':
+                return self.response({'saved': send_remote_backup(data)})
             if self.path == '/probe':
                 transport, fingerprint = connect(data, authenticate=False)
                 transport.close()

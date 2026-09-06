@@ -60,7 +60,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
       if (r.codes) setSecret(r.codes.join('\n'));
       if (r.node_token)
         setSecret(
-          `线路 ID：${r.id || b.id}\nNODE_TOKEN=${r.node_token}\n\n只显示此次。请保存到你自己的线路服务器配置文件中。`,
+          `线路 ID：${r.id || b.id}\n\n一键安装命令（在转发机 root 终端粘贴）：\n\ncurl -fsSL '${location.origin}/relay-install.sh' | bash -s -- '${location.origin}' '${r.node_token}' '${b.probe_ip || ''}'\n\n令牌只显示此次；关闭前请保存命令。`,
         );
       setSuccess(r.message || '已保存');
       setEdit(null);
@@ -464,7 +464,9 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                     </TableCell>
                     <TableCell>
                       {l.enabled ? '启用' : '暂停销售'}
-                      {Boolean(l.requires_front) && <small>强制自备前置机</small>}
+                      {Boolean(l.requires_front) && (
+                        <small>强制自备前置机</small>
+                      )}
                       <small>{stamp(l.heartbeat_at)}</small>
                     </TableCell>
                     <TableCell>
@@ -485,9 +487,14 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => act('rotate-line-token', { id: l.id })}
+                        onClick={() =>
+                          act('rotate-line-token', {
+                            id: l.id,
+                            probe_ip: l.probe_ip,
+                          })
+                        }
                       >
-                        重置令牌
+                        重新生成一键部署
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -512,6 +519,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                   days: 1,
                   price_cents: 0,
                   speed_mbps: 50,
+                  traffic_gb: 0,
                   trial: false,
                   enabled: false,
                   sort: 0,
@@ -531,7 +539,9 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                 <h3>{p.name}</h3>
                 <strong>{money(p.price_cents)}</strong>
                 <p>
-                  {p.speed_mbps} Mbps · {p.enabled ? '已上架' : '未上架'}
+                  {p.speed_mbps} Mbps ·{' '}
+                  {p.traffic_gb ? `${p.traffic_gb} GB` : '不限流量'} ·{' '}
+                  {p.enabled ? '已上架' : '未上架'}
                 </p>
                 <Button
                   variant="outline"
@@ -710,6 +720,25 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                       >
                         {v.role === 'support' ? '撤销客服' : '设为客服'}
                       </Button>
+                      {v.role === 'customer' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setEdit({
+                              kind: 'grant-user',
+                              user_id: v.id,
+                              email: v.email,
+                              line_id: data.lines[0]?.id || '',
+                              expires_at: Math.floor(Date.now() / 1000) + 86400,
+                              speed_mbps: 50,
+                              remaining_gb: 0,
+                            })
+                          }
+                        >
+                          手动添加套餐
+                        </Button>
+                      )}
                     </>
                   )}
                 </TableCell>
@@ -862,7 +891,101 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                       }
                     />
                   </Field>
+                  <Field
+                    label="插入图片 / GIF"
+                    hint="支持 PNG、JPEG、GIF、WebP，最大 3 MB；上传后自动插入 Markdown"
+                  >
+                    <Input
+                      type="file"
+                      accept="image/png,image/jpeg,image/gif,image/webp"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setBusy(true);
+                        setError('');
+                        try {
+                          if (file.size > 3 * 1024 * 1024)
+                            throw new Error('图片不能超过 3 MB');
+                          const dataUrl = await new Promise<string>(
+                            (resolve, reject) => {
+                              const reader = new FileReader();
+                              reader.onload = () =>
+                                resolve(String(reader.result));
+                              reader.onerror = () =>
+                                reject(new Error('读取图片失败'));
+                              reader.readAsDataURL(file);
+                            },
+                          );
+                          const result = await api('admin/article-image', {
+                            data_url: dataUrl,
+                          });
+                          setEdit({
+                            ...edit,
+                            body: `${edit.body || ''}\n\n![${file.name}](${result.url})`,
+                          });
+                        } catch (error) {
+                          setError((error as Error).message);
+                        } finally {
+                          setBusy(false);
+                          e.target.value = '';
+                        }
+                      }}
+                    />
+                  </Field>
                 </>
+              ) : edit.kind === 'grant-user' ? (
+                <div className="form-grid">
+                  <Field label="用户">
+                    <Input value={edit.email} disabled />
+                  </Field>
+                  <Field label="线路">
+                    <Picker
+                      value={edit.line_id}
+                      onChange={(v) => setEdit({ ...edit, line_id: v })}
+                      options={data.lines.map((l: any) => ({
+                        value: l.id,
+                        label: l.name,
+                      }))}
+                    />
+                  </Field>
+                  <Field label="到期时间">
+                    <Input
+                      type="datetime-local"
+                      value={new Date(edit.expires_at * 1000)
+                        .toISOString()
+                        .slice(0, 16)}
+                      onChange={(e) =>
+                        setEdit({
+                          ...edit,
+                          expires_at: Math.floor(
+                            new Date(e.target.value).getTime() / 1000,
+                          ),
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field label="带宽 Mbps">
+                    <Input
+                      type="number"
+                      value={edit.speed_mbps}
+                      onChange={(e) =>
+                        setEdit({ ...edit, speed_mbps: Number(e.target.value) })
+                      }
+                    />
+                  </Field>
+                  <Field label="到期前剩余流量 GB（0 为不限）">
+                    <Input
+                      type="number"
+                      value={edit.remaining_gb}
+                      onChange={(e) =>
+                        setEdit({
+                          ...edit,
+                          remaining_gb: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </Field>
+                </div>
               ) : edit.kind === 'refund-record' ? (
                 <>
                   <Field label="退款状态">
@@ -899,6 +1022,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                         ['port_start', '专属端口池起点'],
                         ['port_end', '专属端口池终点'],
                         ['probe_label', '延迟探测路径说明'],
+                        ['probe_ip', '探测目标公网 IP（可留空）'],
                         ['description', '线路说明'],
                       ]
                     : edit.kind === 'plan'
@@ -907,6 +1031,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                           ['days', '有效天数'],
                           ['price_cents', '价格（分）'],
                           ['speed_mbps', '每方向带宽 Mbps'],
+                          ['traffic_gb', '套餐流量 GB（0 为不限）'],
                           ['sort', '排序'],
                         ]
                       : [
@@ -925,6 +1050,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                             'days',
                             'price_cents',
                             'speed_mbps',
+                            'traffic_gb',
                             'sort',
                             'count',
                             'max_uses',
@@ -1003,10 +1129,16 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
             </DialogDescription>
           </DialogHeader>
           <pre className="secret-output">{secret}</pre>
-          <Button onClick={async () => {
-            try { await navigator.clipboard.writeText(secret); setCopyNotice('已复制'); }
-            catch { setCopyNotice('浏览器未允许复制，请手动选择上方内容复制'); }
-          }}>
+          <Button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(secret);
+                setCopyNotice('已复制');
+              } catch {
+                setCopyNotice('浏览器未允许复制，请手动选择上方内容复制');
+              }
+            }}
+          >
             复制
           </Button>
           <p role="status">{copyNotice}</p>

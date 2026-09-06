@@ -19,8 +19,12 @@ import {
   workerFetch,
 } from './server';
 function normalizeAuthEmail(value: unknown) {
-  const email = String(value ?? '').trim().toLowerCase();
-  const owner = String(env.OWNER_EMAIL ?? '').trim().toLowerCase();
+  const email = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  const owner = String(env.OWNER_EMAIL ?? '')
+    .trim()
+    .toLowerCase();
   if (
     email === owner &&
     email.length <= 254 &&
@@ -74,6 +78,11 @@ export async function sendCode(req: Request, b: any) {
   const s = await settings(),
     email = normalizeAuthEmail(b.email);
   assert(['register', 'reset'].includes(b.purpose), '无效的验证码用途');
+  if (b.purpose === 'register')
+    assert(
+      /^\d{5,12}@qq\.com$/.test(email),
+      '普通用户仅支持数字 QQ 邮箱，例如 123456@qq.com',
+    );
   assert(
     authReadiness(s).mail_ready,
     '邮件发送尚未启用，请联系管理员；已有账号仍可登录',
@@ -136,6 +145,10 @@ export async function register(req: Request, b: any) {
   await throttle('register:' + clientIp(req), 10, 3600);
   await turnstile(req, b.token, 'register', s);
   const email = normalizeEmail(b.email);
+  assert(
+    /^\d{5,12}@qq\.com$/.test(email),
+    '普通用户仅支持数字 QQ 邮箱，例如 123456@qq.com',
+  );
   const emailRequired = s.register_email_verification !== false;
   const digest = emailRequired
     ? await verifyCode(email, 'register', b.code)

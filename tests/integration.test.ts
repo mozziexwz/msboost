@@ -3,8 +3,21 @@ import assert from 'node:assert/strict';
 import { env, sqlite, objects } from './bindings.ts';
 import { id, now, DAY } from '../lib/core.ts';
 import { createOrder, settleOrder } from '../lib/commerce.ts';
-import { saveConfig, getConfig, purgeExpired } from '../lib/configs.ts';
-import { encrypt, stmt, one, hash, turnstile, hmac, probeQuota } from '../lib/server.ts';
+import {
+  bindConfig,
+  saveConfig,
+  getConfig,
+  purgeExpired,
+} from '../lib/configs.ts';
+import {
+  encrypt,
+  stmt,
+  one,
+  hash,
+  turnstile,
+  hmac,
+  probeQuota,
+} from '../lib/server.ts';
 import { createBackup, restoreBackup } from '../lib/backup.ts';
 import {
   setupAdmin,
@@ -30,33 +43,77 @@ const user: any = {
 const line = id();
 test('deployment quota is independent, ignores legacy daily limit and exempts admins', async () => {
   const customer = { id: 'deployment-quota-test', role: 'customer' };
-  await stmt('INSERT OR REPLACE INTO rate_limits(key,count,reset_at) VALUES(?,100,?)', 'vps-jobs:' + customer.id, now() + DAY).run();
+  await stmt(
+    'INSERT OR REPLACE INTO rate_limits(key,count,reset_at) VALUES(?,100,?)',
+    'vps-jobs:' + customer.id,
+    now() + DAY,
+  ).run();
   assert.equal((await probeQuota(customer, false, 'deploy')).remaining, 10);
-  const results = await Promise.all(Array.from({ length: 12 }, () => probeQuota(customer, true, 'deploy').then(() => true, () => false)));
+  const results = await Promise.all(
+    Array.from({ length: 12 }, () =>
+      probeQuota(customer, true, 'deploy').then(
+        () => true,
+        () => false,
+      ),
+    ),
+  );
   assert.equal(results.filter(Boolean).length, 10);
   const quota = await probeQuota(customer, false, 'deploy');
   assert.equal(quota.remaining, 0);
   assert.ok(quota.reset_at! <= now() + 1800);
   assert.equal((await probeQuota(customer)).remaining, 10);
-  await assert.rejects(() => probeQuota(customer, true, 'deploy'), /部署提交已用完/);
-  assert.equal((await probeQuota(customer, false, 'deploy')).reset_at, quota.reset_at);
-  for (let i = 0; i < 12; i++) assert.equal((await probeQuota({ ...customer, role: 'admin' }, true, 'deploy')).unlimited, true);
-  await stmt('UPDATE rate_limits SET reset_at=? WHERE key=?', now() - 1, 'vps-deploy-v2:' + customer.id).run();
+  await assert.rejects(
+    () => probeQuota(customer, true, 'deploy'),
+    /部署提交已用完/,
+  );
+  assert.equal(
+    (await probeQuota(customer, false, 'deploy')).reset_at,
+    quota.reset_at,
+  );
+  for (let i = 0; i < 12; i++)
+    assert.equal(
+      (await probeQuota({ ...customer, role: 'admin' }, true, 'deploy'))
+        .unlimited,
+      true,
+    );
+  await stmt(
+    'UPDATE rate_limits SET reset_at=? WHERE key=?',
+    now() - 1,
+    'vps-deploy-v2:' + customer.id,
+  ).run();
   assert.equal((await probeQuota(customer, true, 'deploy')).remaining, 9);
 });
 test('fingerprint quota: admin unlimited, customers ten per fixed thirty minutes', async () => {
   const customer = { id: 'quota-test', role: 'customer' };
-  await stmt('DELETE FROM rate_limits WHERE key=?', 'vps-probe-v2:quota-test').run();
+  await stmt(
+    'DELETE FROM rate_limits WHERE key=?',
+    'vps-probe-v2:quota-test',
+  ).run();
   assert.equal((await probeQuota(customer)).remaining, 10);
-  const results = await Promise.all(Array.from({ length: 12 }, () => probeQuota(customer, true).then(() => true, () => false)));
+  const results = await Promise.all(
+    Array.from({ length: 12 }, () =>
+      probeQuota(customer, true).then(
+        () => true,
+        () => false,
+      ),
+    ),
+  );
   assert.equal(results.filter(Boolean).length, 10);
   const limited = await probeQuota(customer);
   assert.equal(limited.remaining, 0);
   assert.ok(limited.reset_at! <= now() + 1800);
   await assert.rejects(() => probeQuota(customer, true));
   assert.equal((await probeQuota(customer)).reset_at, limited.reset_at);
-  for (let i = 0; i < 12; i++) assert.equal((await probeQuota({ ...customer, role: 'admin' }, true)).unlimited, true);
-  await stmt('UPDATE rate_limits SET reset_at=? WHERE key=?', now() - 1, 'vps-probe-v2:quota-test').run();
+  for (let i = 0; i < 12; i++)
+    assert.equal(
+      (await probeQuota({ ...customer, role: 'admin' }, true)).unlimited,
+      true,
+    );
+  await stmt(
+    'UPDATE rate_limits SET reset_at=? WHERE key=?',
+    now() - 1,
+    'vps-probe-v2:quota-test',
+  ).run();
   assert.equal((await probeQuota(customer)).remaining, 10);
   assert.equal((await probeQuota(customer, true)).remaining, 9);
 });
@@ -130,11 +187,15 @@ test('payment, expiry, storage and access integration', async (t) => {
         register_email_verification: false,
       });
       const account = {
-        email: 'newcustomer@qq.com',
+        email: '123456@qq.com',
         password: 'customer-password-test',
         agreed: true,
       };
       await assert.rejects(() => register(req, account), /邀请码/);
+      await assert.rejects(
+        () => register(req, { ...account, email: '12345a@qq.com' }),
+        /数字 QQ 邮箱/,
+      );
       await adminAction(req, { ...user, role: 'admin' }, 'settings', {
         invite_required: false,
       });
@@ -171,7 +232,7 @@ test('payment, expiry, storage and access integration', async (t) => {
         register_email_verification: true,
       });
       const account = {
-        email: 'verifiedcustomer@qq.com',
+        email: '654321@qq.com',
         password: 'customer-password-test',
         agreed: true,
       };
@@ -223,7 +284,7 @@ test('payment, expiry, storage and access integration', async (t) => {
           login(req, { ...credentials, email: 'customer@gmail.com' }),
         );
         await assert.rejects(
-          () => sendCode(req, { email: env.OWNER_EMAIL, purpose: 'register' }),
+          () => sendCode(req, { email: '123456@qq.com', purpose: 'register' }),
           /邮件发送尚未启用/,
         );
       } finally {
@@ -329,6 +390,39 @@ test('payment, expiry, storage and access integration', async (t) => {
           .password,
         'node-secret-test',
       );
+    },
+  );
+  await t.test(
+    'binding a new target replaces the only customer target and resets its configuration',
+    async () => {
+      fixture();
+      await createOrder(req, user, input);
+      const relay = await one('SELECT id FROM relays WHERE user_id=?', user.id);
+      const replacement = JSON.stringify({
+        profiles: [
+          {
+            profileName: 'replacement',
+            user: { name: 'old-name', password: 'replacement-secret' },
+            servers: [
+              {
+                ipAddress: '1.1.1.1',
+                portBindings: [{ port: 45002, protocol: 'TCP' }],
+              },
+            ],
+          },
+        ],
+        activeProfile: 'replacement',
+        socks5Port: 1080,
+      });
+      await bindConfig(user, relay.id, replacement, '0:0:0');
+      const saved = await one('SELECT * FROM relays WHERE id=?', relay.id);
+      assert.equal(saved.target_ip, '1.1.1.1');
+      assert.equal(saved.target_port, 45002);
+      const config = (await (await getConfig(user, relay.id)).json()) as any;
+      assert.equal(config.profiles[0].profileName, 'one');
+      assert.equal(config.profiles[0].user.name, 'one');
+      assert.equal(config.socks5Port, 6666);
+      assert.equal(objects.size, 1);
     },
   );
   await t.test(

@@ -68,6 +68,7 @@ export const lines = sqliteTable('lines', {
   token_hash: text().notNull(),
   heartbeat_at: integer(),
   probe_label: text().notNull().default('线路服务器 → 配置的探测目标'),
+  probe_ip: text().notNull().default(''),
   rtt_ms: real(),
   loss_pct: real(),
   cpu_pct: real(),
@@ -94,6 +95,7 @@ export const plans = sqliteTable('plans', {
   days: integer().notNull(),
   price_cents: integer().notNull(),
   speed_mbps: integer().notNull(),
+  traffic_gb: integer().notNull().default(0),
   trial: integer().notNull().default(0),
   enabled: integer().notNull().default(0),
   sort: integer().notNull().default(0),
@@ -115,6 +117,8 @@ export const relays = sqliteTable(
     listen_port: integer().notNull(),
     expires_at: integer().notNull().default(0),
     speed_mbps: integer().notNull(),
+    traffic_limit_bytes: integer().notNull().default(0),
+    traffic_used_bytes: integer().notNull().default(0),
     suspended: integer().notNull().default(0),
     revision: integer().notNull().default(1),
     reported_state: text().notNull().default('pending'),
@@ -128,6 +132,24 @@ export const relays = sqliteTable(
     uniqueIndex('relay_user_line').on(t.user_id, t.line_id),
   ],
 );
+export const contentAssets = sqliteTable('content_assets', {
+  id: text().primaryKey(),
+  object_key: text().notNull().unique(),
+  content_type: text().notNull(),
+  size: integer().notNull(),
+  created_at: integer().notNull(),
+});
+export const backupTargets = sqliteTable('backup_targets', {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  host: text().notNull(),
+  port: integer().notNull().default(22),
+  username: text().notNull(),
+  remote_path: text().notNull(),
+  credential: text().notNull(),
+  enabled: integer().notNull().default(1),
+  created_at: integer().notNull(),
+});
 export const orders = sqliteTable(
   'orders',
   {
@@ -145,6 +167,7 @@ export const orders = sqliteTable(
     days: integer().notNull(),
     price_cents: integer().notNull(),
     speed_mbps: integer().notNull(),
+    traffic_gb: integer().notNull().default(0),
     trial: integer().notNull().default(0),
     status: text().notNull().default('pending'),
     channel: text().notNull(),
