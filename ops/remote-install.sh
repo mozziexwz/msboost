@@ -89,6 +89,28 @@ rules:
   - DOMAIN-SUFFIX,maplestory.nexon.com,DIRECT
   - DOMAIN-SUFFIX,maplestory.nexon.net,DIRECT
   - DOMAIN-SUFFIX,maplestorym.nexon.com,DIRECT
+  # Current GTop100 MapleStory top-20 website domains (2026-09-06).
+  # Do not pin their resolved CDN IPs: shared addresses would allow unrelated sites.
+  - DOMAIN-SUFFIX,royals.ms,DIRECT
+  - DOMAIN-SUFFIX,legends.ml,DIRECT
+  - DOMAIN-SUFFIX,meowms.net,DIRECT
+  - DOMAIN-SUFFIX,dreamms.gg,DIRECT
+  - DOMAIN-SUFFIX,starms.cc,DIRECT
+  - DOMAIN-SUFFIX,fantasia.ms,DIRECT
+  - DOMAIN-SUFFIX,playkuro.com,DIRECT
+  - DOMAIN-SUFFIX,wingstory.org,DIRECT
+  - DOMAIN-SUFFIX,rien.ms,DIRECT
+  - DOMAIN-SUFFIX,kook.vip,DIRECT
+  - DOMAIN-SUFFIX,kaizenms.net,DIRECT
+  - DOMAIN-SUFFIX,beyond-ms.com,DIRECT
+  - DOMAIN-SUFFIX,slimetale.ms,DIRECT
+  - DOMAIN-SUFFIX,mysticms.net,DIRECT
+  - DOMAIN-SUFFIX,ranmelle.com,DIRECT
+  - DOMAIN-SUFFIX,yuna.ms,DIRECT
+  - DOMAIN-SUFFIX,bellocan.net,DIRECT
+  - DOMAIN-SUFFIX,royalstory.org,DIRECT
+  - DOMAIN-SUFFIX,elluel.net,DIRECT
+  - DOMAIN-SUFFIX,playmuto.com,DIRECT
   - DOMAIN-SUFFIX,steampowered.com,DIRECT
   - DOMAIN-SUFFIX,steamcommunity.com,DIRECT
   - DOMAIN-SUFFIX,steamgames.com,DIRECT

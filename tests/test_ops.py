@@ -32,6 +32,14 @@ class OperationsTests(unittest.TestCase):
         self.assertIn('/usr/local/lib/msboost/core', script)
         self.assertIn('trap cleanup EXIT', script)
 
+    def test_game_allowlist_precedes_gfw_rejection_without_shared_ip_pins(self):
+        script = (Path(__file__).resolve().parents[1] / 'ops' / 'remote-install.sh').read_text(encoding='utf-8')
+        for domain in ('gtop100.com', 'nexon.net', 'maplestory.com', 'royals.ms', 'playmuto.com',
+                       'steampowered.com', 'akamaihd.net', 'discord.com'):
+            self.assertIn(f'DOMAIN-SUFFIX,{domain},DIRECT', script)
+        self.assertLess(script.index('DOMAIN-SUFFIX,royals.ms,DIRECT'), script.index('RULE-SET,gfw-block,REJECT'))
+        self.assertNotIn('IP-CIDR,', script)
+
     def test_backend_smtp_configuration_uses_tls_and_saved_credentials(self):
         data = {'email': 'owner@gmail.com', 'purpose': 'test', 'smtp': {'host': 'smtp.qq.com', 'port': 465, 'username': 'sender@qq.com', 'password': 'smtp-test-secret', 'from': 'sender@qq.com'}}
         with patch.object(worker.socket, 'getaddrinfo', return_value=[(2, 1, 6, '', ('8.8.8.8', 465))]), patch.object(worker.smtplib, 'SMTP_SSL') as client:
