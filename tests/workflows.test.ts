@@ -115,6 +115,14 @@ test('admin save, ticket ownership, and configuration validation workflows', asy
     traffic_gb: 20,
   });
   assert.equal(freeRegular.status, 200);
+  assert.equal(
+    (await api('admin/plan-delete', adminToken, { id: 'free-regular' })).status,
+    200,
+  );
+  assert.equal(
+    sqlite.prepare("SELECT id FROM plans WHERE id='free-regular'").get(),
+    undefined,
+  );
   const invalid = await api('admin/plan', adminToken, {
     ...plan,
     id: 'too-long',

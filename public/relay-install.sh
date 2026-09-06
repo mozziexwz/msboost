@@ -18,12 +18,16 @@ id msboostgost >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr
 install -d -m 0755 /opt/msboost /usr/local/lib/msboostgost
 install -d -m 0700 /etc/msboostgost
 install -d -m 0700 -o msboostgost -g msboostgost /var/lib/msboostgost
+STAGE="$(mktemp -d /tmp/msboost-relay.XXXXXX)"
+cleanup() { rm -rf -- "$STAGE"; }
+trap cleanup EXIT
 for file in relay.py assets.py install-binary.py msboostgost.service; do
-  curl -fsSL --retry 3 "$ORIGIN/relay-assets/$file" -o "/tmp/msboost-$file"
+  curl -fsSL --retry 3 "$ORIGIN/relay-assets/$file" -o "$STAGE/$file"
 done
-install -m 0644 /tmp/msboost-relay.py /tmp/msboost-assets.py /opt/msboost/
-python3 /tmp/msboost-install-binary.py /usr/local/lib/msboostgost/msboostgost
-install -m 0644 /tmp/msboost-msboostgost.service /etc/systemd/system/msboostgost.service
+install -m 0644 "$STAGE/relay.py" /opt/msboost/relay.py
+install -m 0644 "$STAGE/assets.py" /opt/msboost/assets.py
+python3 "$STAGE/install-binary.py" /usr/local/lib/msboostgost/msboostgost
+install -m 0644 "$STAGE/msboostgost.service" /etc/systemd/system/msboostgost.service
 cat > /etc/msboostgost/node.env <<EOF
 MSBOOST_ORIGIN=$ORIGIN
 NODE_TOKEN=$NODE_TOKEN
@@ -33,7 +37,6 @@ MAX_RELAYS=200
 PROBE_IP=$PROBE_IP
 EOF
 chmod 0600 /etc/msboostgost/node.env
-rm -f -- /tmp/msboost-relay.py /tmp/msboost-assets.py /tmp/msboost-install-binary.py /tmp/msboost-msboostgost.service
 systemctl daemon-reload
 systemctl enable --now msboostgost.service
 systemctl is-active --quiet msboostgost.service

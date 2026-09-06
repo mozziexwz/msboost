@@ -32,6 +32,15 @@ class OperationsTests(unittest.TestCase):
         self.assertIn('/usr/local/lib/msboost/core', script)
         self.assertIn('trap cleanup EXIT', script)
 
+    def test_relay_installer_preserves_python_module_and_service_filenames(self):
+        script = (Path(__file__).resolve().parents[1] / 'public' / 'relay-install.sh').read_text(encoding='utf-8')
+        self.assertIn('mktemp -d /tmp/msboost-relay.XXXXXX', script)
+        self.assertIn('"$STAGE/$file"', script)
+        self.assertIn('"$STAGE/install-binary.py"', script)
+        self.assertIn('/opt/msboost/relay.py', script)
+        self.assertIn('/opt/msboost/assets.py', script)
+        self.assertNotIn('/tmp/msboost-install-binary.py', script)
+
     def test_game_allowlist_precedes_gfw_rejection_without_shared_ip_pins(self):
         script = (Path(__file__).resolve().parents[1] / 'ops' / 'remote-install.sh').read_text(encoding='utf-8')
         for domain in ('gtop100.com', 'nexon.net', 'maplestory.com', 'royals.ms', 'playmuto.com',

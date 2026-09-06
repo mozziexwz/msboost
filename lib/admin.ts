@@ -323,6 +323,25 @@ export async function adminAction(
       b.enabled ? 1 : 0,
       int(b.sort || 0, 0, 1000, '排序'),
     ).run();
+  } else if (action === 'plan-delete') {
+    const pid = text(b.id, 40, '套餐 ID');
+    assert(
+      await one('SELECT id FROM plans WHERE id=?', pid),
+      '套餐不存在',
+      404,
+    );
+    const used = await one(
+      'SELECT COUNT(*) AS total FROM orders WHERE plan_id=?',
+      pid,
+    );
+    if (Number(used?.total || 0) > 0) {
+      await stmt('UPDATE plans SET enabled=0 WHERE id=?', pid).run();
+      await audit(req, u.id, 'admin.plan.archive', pid);
+      return { message: '套餐已有订单，已安全下架并保留财务记录' };
+    }
+    await stmt('DELETE FROM plans WHERE id=?', pid).run();
+    await audit(req, u.id, 'admin.plan.delete', pid);
+    return { message: '套餐已删除' };
   } else if (action === 'invite') {
     const count = int(b.count || 1, 1, 50, '生成数量'),
       uses = int(b.max_uses || 1, 1, 10000, '使用次数'),

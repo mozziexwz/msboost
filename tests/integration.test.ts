@@ -373,6 +373,28 @@ test('payment, expiry, storage and access integration', async (t) => {
     },
   );
   await t.test(
+    'deleting a plan with financial history archives it instead of removing orders',
+    async () => {
+      fixture();
+      await createOrder(req, user, input);
+      const result = await adminAction(
+        req,
+        { ...user, role: 'admin' },
+        'plan-delete',
+        { id: 'trial' },
+      );
+      assert.match(String(result.message), /下架/);
+      assert.equal(
+        (await one("SELECT enabled FROM plans WHERE id='trial'"))!.enabled,
+        0,
+      );
+      assert.equal(
+        (await one('SELECT COUNT(*) AS total FROM orders'))!.total,
+        1,
+      );
+    },
+  );
+  await t.test(
     'replacement uploads retain one active configuration and collect all superseded files',
     async () => {
       fixture();

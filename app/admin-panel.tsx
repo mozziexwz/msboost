@@ -20,7 +20,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Plus, RefreshCw, Save, Settings2 } from 'lucide-react';
+import { Plus, RefreshCw, Save, Settings2, Trash2 } from 'lucide-react';
 import BackupCenter from './backup-center';
 import {
   api,
@@ -514,7 +514,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
         <>
           <div className="subheading mt-6">
             <p className="muted">
-              体验资格按账号永久记一次；超过 30 天剩余有效期时暂停该线路续购。
+              体验资格按账号永久记一次；超过 30 天剩余有效期时暂停续购。
             </p>
             <Button
               onClick={() =>
@@ -560,6 +560,20 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                   }
                 >
                   编辑套餐
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `确定删除套餐“${p.name}”吗？已有订单的套餐会改为安全下架，以保留财务记录。`,
+                      )
+                    )
+                      act('plan-delete', { id: p.id });
+                  }}
+                >
+                  <Trash2 size={16} />
+                  删除套餐
                 </Button>
               </div>
             ))}

@@ -817,6 +817,9 @@ export default function Dashboard() {
                       ))}
                   </div>
                 </div>
+                {!settings.terms_confirmed && (
+                  <Notice text="管理员尚未开启套餐销售。请进入管理后台 → 站点设置，打开“开放套餐销售”并保存。" />
+                )}
                 {plan && plan.price_cents > 0 && (
                   <div className="selection-block mt-5">
                     <h3>选择支付方式</h3>
@@ -848,7 +851,11 @@ export default function Dashboard() {
                     disabled={busy || !plan || !settings.terms_confirmed}
                     onClick={order}
                   >
-                    {plan?.price_cents === 0 ? '立即领取' : '创建订单'}
+                    {!settings.terms_confirmed
+                      ? '管理员未开放销售'
+                      : plan?.price_cents === 0
+                        ? '立即领取'
+                        : '创建订单'}
                     <ArrowRight size={16} />
                   </Button>
                 </div>
