@@ -35,7 +35,6 @@ export default function VpsTools({
     [fingerprint, setFingerprint] = useState(''),
     [fingerprintConfirmed, setFingerprintConfirmed] = useState(false),
     [newPort, setNewPort] = useState(0),
-    [portConfirmed, setPortConfirmed] = useState(false),
     [confirm, setConfirm] = useState(''),
     [dialog, setDialog] = useState(false),
     [busy, setBusy] = useState(false),
@@ -93,7 +92,6 @@ export default function VpsTools({
         password,
         fingerprint,
         new_ssh_port: newPort,
-        port_confirmed: portConfirmed,
         confirm,
         relay_id: relayId,
         front_port: frontPort,
@@ -220,13 +218,6 @@ export default function VpsTools({
                 onChange={(e) => setNewPort(Number(e.target.value))}
               />
             </Field>
-            <label className="check-line">
-              <Checkbox
-                checked={portConfirmed}
-                onCheckedChange={(v) => setPortConfirmed(Boolean(v))}
-              />
-              已在云安全组放行新端口，并保存备份
-            </label>
           </div>
         )}
         <div className="fingerprint">
@@ -260,7 +251,6 @@ export default function VpsTools({
             busy ||
             !password ||
             !fingerprintConfirmed ||
-            (kind === 'dd' && !portConfirmed) ||
             (kind === 'front' && !relayId) ||
             !settings.worker_ready
           }

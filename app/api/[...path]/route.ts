@@ -398,7 +398,6 @@ async function handle(req: Request) {
       int(b.ssh_port, 1, 65535, 'SSH 端口');
       if (b.kind === 'dd') {
         int(b.new_ssh_port, 20000, 59999, '新 SSH 端口');
-        assert(b.port_confirmed === true, '请先在云安全组放行新 SSH 端口');
       }
       assert(
         typeof b.fingerprint === 'string' &&
