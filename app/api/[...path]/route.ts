@@ -273,7 +273,8 @@ async function handle(req: Request) {
         new URL(req.url).searchParams.get('front') === '1',
       );
     }
-    if (method === 'POST') await throttle('write:' + u.id, 100, 60);
+    if (method === 'POST' && !(path === 'vps/probe' && u.role === 'admin'))
+      await throttle('write:' + u.id, 100, 60);
     if (method === 'POST' && path === 'orders')
       return json(await createOrder(req, u, b));
     if (method === 'POST' && path === 'orders/pay')
