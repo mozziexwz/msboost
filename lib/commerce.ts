@@ -100,17 +100,11 @@ export async function settleOrder(
 export async function createOrder(req: Request, u: User, b: any) {
   const s = await settings();
   assert(s.terms_confirmed, '套餐销售尚未开放', 503);
-  const line = await one(
-      'SELECT * FROM lines WHERE id=? AND enabled=1',
-      b.line_id,
-    ),
-    plan = await one('SELECT * FROM plans WHERE id=? AND enabled=1', b.plan_id);
-  assert(line && plan, '线路或套餐不可用');
-  assert(
-    line.heartbeat_at && line.heartbeat_at > now() - 120,
-    '线路离线或状态过期，请稍后重试',
-    409,
+  const plan = await one(
+    'SELECT * FROM plans WHERE id=? AND enabled=1',
+    b.plan_id,
   );
+  assert(plan, '套餐不可用');
   assert(!plan.trial || !u.trial_used, '每个账号仅可领取一次免费体验');
   const hasTarget = Boolean(b.target_host),
     targetHost = hasTarget
@@ -148,11 +142,6 @@ export async function createOrder(req: Request, u: User, b: any) {
       '当前线路剩余有效期超过 30 天，暂不能重复购买',
       409,
     );
-    assert(
-      relay.line_id === line.id,
-      '当前账号已有套餐；续费请选择原线路，换线请提交工单',
-      409,
-    );
     if (hasTarget)
       await stmt(
         "UPDATE relays SET target_host=?,target_ip=?,target_port=?,protocol=?,suspended=0,revision=revision+1,reported_state='pending' WHERE id=?",
@@ -163,36 +152,49 @@ export async function createOrder(req: Request, u: User, b: any) {
         relay.id,
       ).run();
   } else {
-    const used = new Set(
-      (
-        await rows('SELECT listen_port FROM relays WHERE line_id=?', line.id)
-      ).map((x) => x.listen_port),
+    const availableLines = await rows(
+      'SELECT * FROM lines WHERE enabled=1 ORDER BY created_at',
     );
-    for (let port = line.port_start; port <= line.port_end; port++) {
-      if (used.has(port)) continue;
-      try {
-        await stmt(
-          'INSERT INTO relays(id,user_id,line_id,target_host,target_ip,target_port,protocol,listen_port,speed_mbps,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
-          id(),
-          u.id,
-          line.id,
-          targetHost,
-          targetIp,
-          targetPort,
-          protocol,
-          port,
-          plan.speed_mbps,
-          now(),
-        ).run();
-        break;
-      } catch (e) {
-        if (!String(e).includes('UNIQUE')) throw e;
+    assert(availableLines.length, '管理员尚未配置可用线路', 503);
+    for (const candidate of availableLines) {
+      const used = new Set(
+        (
+          await rows(
+            'SELECT listen_port FROM relays WHERE line_id=?',
+            candidate.id,
+          )
+        ).map((x) => x.listen_port),
+      );
+      for (
+        let port = candidate.port_start;
+        port <= candidate.port_end;
+        port++
+      ) {
+        if (used.has(port)) continue;
+        try {
+          await stmt(
+            'INSERT INTO relays(id,user_id,line_id,target_host,target_ip,target_port,protocol,listen_port,speed_mbps,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+            id(),
+            u.id,
+            candidate.id,
+            targetHost,
+            targetIp,
+            targetPort,
+            protocol,
+            port,
+            plan.speed_mbps,
+            now(),
+          ).run();
+          break;
+        } catch (e) {
+          if (!String(e).includes('UNIQUE')) throw e;
+        }
       }
+      relay = await one('SELECT * FROM relays WHERE user_id=?', u.id);
+      if (relay) break;
     }
-    relay = await one('SELECT * FROM relays WHERE user_id=?', u.id);
-    assert(relay, '当前线路端口已用完', 409);
+    assert(relay, '所有线路端口均已用完', 409);
   }
-  assert(relay.line_id === line.id, '套餐线路冲突，请刷新重试', 409);
   const channel = plan.price_cents === 0 ? 'free' : b.channel;
   assert(plan.price_cents >= 0, '套餐价格无效');
   assert(

@@ -212,7 +212,7 @@ async function handle(req: Request) {
         settings(),
         currentUser(req),
         rows(
-          'SELECT id,name,region,description,host,enabled,requires_front,heartbeat_at,probe_label,rtt_ms,loss_pct FROM lines ORDER BY created_at',
+          'SELECT id,name,region,description,host,enabled,requires_front,heartbeat_at,probe_label,rtt_ms,loss_pct FROM lines WHERE enabled=1 ORDER BY created_at',
         ),
         rows('SELECT * FROM plans WHERE enabled=1 ORDER BY sort'),
         rows(
@@ -333,6 +333,7 @@ async function handle(req: Request) {
         await bindConfig(
           u,
           text(b.relay_id, 40, '转发 ID'),
+          text(b.line_id, 40, '线路'),
           text(b.source, 131072, '配置'),
           text(b.target_key, 40, '节点'),
         ),

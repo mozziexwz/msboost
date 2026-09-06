@@ -87,6 +87,7 @@ export async function saveConfig(u: User, relayId: string, source: string) {
 export async function bindConfig(
   u: User,
   relayId: string,
+  lineId: string,
   source: string,
   targetKey: string,
 ) {
@@ -107,15 +108,41 @@ export async function bindConfig(
     '套餐流量已用尽',
     403,
   );
+  const line = await one(
+    'SELECT * FROM lines WHERE id=? AND enabled=1',
+    lineId,
+  );
+  assert(line, '所选线路不可用');
+  assert(
+    line.heartbeat_at && line.heartbeat_at > now() - 120,
+    '所选线路当前离线，请选择其他线路',
+    409,
+  );
   const parsed = parseConfig(source),
     target = parsed.targets.find((t) => t.key === targetKey);
   assert(target, '请选择有效的节点');
   const targetIp = await resolveTarget(target.host);
+  const own = await rows('SELECT host FROM lines');
   assert(
-    targetIp !== relay.relay_host && target.host !== relay.relay_host,
+    !own.some((x) => x.host === target.host || x.host === targetIp),
     '不能把本站线路作为落地节点',
   );
-  await db().batch([
+  let listenPort = relay.listen_port;
+  if (relay.line_id !== line.id) {
+    const used = new Set(
+      (
+        await rows('SELECT listen_port FROM relays WHERE line_id=?', line.id)
+      ).map((x) => x.listen_port),
+    );
+    listenPort = 0;
+    for (let port = line.port_start; port <= line.port_end; port++)
+      if (!used.has(port)) {
+        listenPort = port;
+        break;
+      }
+    assert(listenPort, '所选线路端口已用完', 409);
+  }
+  const mutations = [
     stmt(
       'INSERT OR IGNORE INTO config_garbage(object_key,delete_after) SELECT c.object_key,? FROM config_files c JOIN relays r ON r.id=c.relay_id WHERE r.user_id=? AND r.id<>?',
       now(),
@@ -139,7 +166,9 @@ export async function bindConfig(
     ),
     stmt('DELETE FROM config_files WHERE relay_id=?', relayId),
     stmt(
-      "UPDATE relays SET target_host=?,target_ip=?,target_port=?,protocol=?,suspended=0,traffic_used_bytes=0,revision=revision+1,reported_state='pending' WHERE id=? AND user_id=?",
+      "UPDATE relays SET line_id=?,listen_port=?,target_host=?,target_ip=?,target_port=?,protocol=?,suspended=0,traffic_used_bytes=0,revision=revision+1,reported_state='pending' WHERE id=? AND user_id=?",
+      line.id,
+      listenPort,
       target.host,
       targetIp,
       target.port,
@@ -147,7 +176,10 @@ export async function bindConfig(
       relayId,
       u.id,
     ),
-  ]);
+  ];
+  if (relay.line_id !== line.id)
+    mutations.push(stmt('DELETE FROM fronts WHERE relay_id=?', relayId));
+  await db().batch(mutations);
   await saveConfig(u, relayId, source);
   return { saved: true };
 }

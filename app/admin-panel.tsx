@@ -39,7 +39,11 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
     [success, setSuccess] = useState(''),
     [busy, setBusy] = useState(false),
     [edit, setEdit] = useState<any>(null),
-    [secret, setSecret] = useState(''),
+    [secret, setSecret] = useState<{
+      title?: string;
+      text?: string;
+      command?: string;
+    } | null>(null),
     [copyNotice, setCopyNotice] = useState('');
   async function load() {
     try {
@@ -57,11 +61,12 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
     setSuccess('');
     try {
       const r = await api('admin/' + action, b);
-      if (r.codes) setSecret(r.codes.join('\n'));
+      if (r.codes) setSecret({ text: r.codes.join('\n') });
       if (r.node_token)
-        setSecret(
-          `线路 ID：${r.id || b.id}\n\n一键安装命令（在转发机 root 终端粘贴）：\n\ncurl -fsSL '${location.origin}/relay-install.sh' | bash -s -- '${location.origin}' '${r.node_token}' '${b.probe_ip || ''}'\n\n令牌只显示此次；关闭前请保存命令。`,
-        );
+        setSecret({
+          title: `线路 ID：${r.id || b.id}`,
+          command: `curl -fsSL '${location.origin}/relay-install.sh' | bash -s -- '${location.origin}' '${r.node_token}' '${b.probe_ip || ''}'`,
+        });
       setSuccess(r.message || '已保存');
       setEdit(null);
       await load();
@@ -1120,7 +1125,10 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
           )}
         </DialogContent>
       </Dialog>
-      <Dialog open={Boolean(secret)} onOpenChange={(v) => !v && setSecret('')}>
+      <Dialog
+        open={Boolean(secret)}
+        onOpenChange={(v) => !v && setSecret(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>请立即保存</DialogTitle>
@@ -1128,18 +1136,33 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
               关闭后无法再次查看原始令牌或邀请码
             </DialogDescription>
           </DialogHeader>
-          <pre className="secret-output">{secret}</pre>
+          {secret?.title && <p className="secret-title">{secret.title}</p>}
+          {secret?.command && (
+            <>
+              <p className="muted">
+                在转发机的 root 终端中只粘贴下面这一条命令，不要复制标题、说明或
+                Markdown 链接符号。
+              </p>
+              <pre className="secret-output">{secret.command}</pre>
+              <Notice text="站点处于私有访问时，转发机会收到 401；需先将正式站点设为公开访问。" />
+            </>
+          )}
+          {secret?.text && <pre className="secret-output">{secret.text}</pre>}
           <Button
             onClick={async () => {
               try {
-                await navigator.clipboard.writeText(secret);
-                setCopyNotice('已复制');
+                await navigator.clipboard.writeText(
+                  secret?.command || secret?.text || '',
+                );
+                setCopyNotice(
+                  secret?.command ? '已仅复制安装命令' : '已复制邀请码',
+                );
               } catch {
                 setCopyNotice('浏览器未允许复制，请手动选择上方内容复制');
               }
             }}
           >
-            复制
+            {secret?.command ? '仅复制命令' : '复制邀请码'}
           </Button>
           <p role="status">{copyNotice}</p>
         </DialogContent>

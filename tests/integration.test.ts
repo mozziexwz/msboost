@@ -155,7 +155,6 @@ function fixture() {
     .run('terms_confirmed', 'true');
 }
 const input = {
-  line_id: line,
   plan_id: 'trial',
   target_host: '8.8.8.8',
   target_port: 45001,
@@ -414,7 +413,7 @@ test('payment, expiry, storage and access integration', async (t) => {
         activeProfile: 'replacement',
         socks5Port: 1080,
       });
-      await bindConfig(user, relay.id, replacement, '0:0:0');
+      await bindConfig(user, relay.id, line, replacement, '0:0:0');
       const saved = await one('SELECT * FROM relays WHERE id=?', relay.id);
       assert.equal(saved.target_ip, '1.1.1.1');
       assert.equal(saved.target_port, 45002);
@@ -423,6 +422,48 @@ test('payment, expiry, storage and access integration', async (t) => {
       assert.equal(config.profiles[0].user.name, 'one');
       assert.equal(config.socks5Port, 6666);
       assert.equal(objects.size, 1);
+    },
+  );
+  await t.test(
+    'package purchase is line-independent and binding can move the relay to another line',
+    async () => {
+      fixture();
+      await createOrder(req, user, input);
+      const relay = await one('SELECT * FROM relays WHERE user_id=?', user.id);
+      const secondLine = 'line-2';
+      await stmt(
+        'INSERT INTO lines(id,name,region,host,port_start,port_end,enabled,token_hash,heartbeat_at,created_at) VALUES(?,?,?,?,?,?,1,?,?,?)',
+        secondLine,
+        '线路2',
+        '测试2',
+        'relay-2.msboost.de',
+        32000,
+        32010,
+        'test-token-2',
+        now(),
+        now() + 1,
+      ).run();
+      await stmt(
+        'INSERT INTO fronts(relay_id,host,port,job_id,created_at) VALUES(?,?,?,?,?)',
+        relay.id,
+        '9.9.9.9',
+        35000,
+        'old-front',
+        now(),
+      ).run();
+      await bindConfig(user, relay.id, secondLine, source, '0:0:0');
+      const moved = await one('SELECT * FROM relays WHERE id=?', relay.id);
+      assert.equal(moved.line_id, secondLine);
+      assert.ok(moved.listen_port >= 32000 && moved.listen_port <= 32010);
+      assert.equal(
+        await one('SELECT * FROM fronts WHERE relay_id=?', relay.id),
+        null,
+      );
+      const config = (await (await getConfig(user, relay.id)).json()) as any;
+      assert.equal(
+        config.profiles[0].servers[0].domainName,
+        'relay-2.msboost.de',
+      );
     },
   );
   await t.test(

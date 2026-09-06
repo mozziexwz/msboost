@@ -37,7 +37,6 @@ import {
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import MapleIcon from './maple-icon';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   Table,
   TableHeader,
@@ -67,7 +66,6 @@ import {
   Field,
   Loading,
   Notice,
-  Picker,
   money,
   stamp,
 } from './widgets';
@@ -265,13 +263,12 @@ export default function Dashboard() {
       setAuth(true);
       return;
     }
-    if (!line || !plan) return;
+    if (!plan) return;
     setBusy(true);
     setError('');
     setSuccess('');
     try {
       const o = await api('orders', {
-        line_id: line.id,
         plan_id: plan.id,
         channel,
       });
@@ -289,13 +286,14 @@ export default function Dashboard() {
     }
   }
   async function bindTunnel() {
-    if (!activeSubscription || !parsed || !target) return;
+    if (!activeSubscription || !parsed || !target || !line) return;
     setBusy(true);
     setError('');
     setSuccess('');
     try {
       await api('relays/bind', {
         relay_id: activeSubscription.id,
+        line_id: line.id,
         source: JSON.stringify(parsed.config),
         target_key: target.key,
       });
@@ -647,17 +645,48 @@ export default function Dashboard() {
                     </span>
                   </button>
                   {parsed && (
-                    <div className="import-result">
-                      <Picker
-                        value={targetKey}
-                        onChange={setTargetKey}
-                        options={parsed.targets.map((t) => ({
-                          value: t.key,
-                          label: `${t.name} · ${t.host}:${t.port} · ${t.protocol}`,
-                        }))}
-                      />
+                    <div className="selection-block">
+                      <h3>选择直连节点</h3>
+                      <div className="selection-grid">
+                        {parsed.targets.map((t) => (
+                          <button
+                            type="button"
+                            key={t.key}
+                            className={`selection-card ${targetKey === t.key ? 'selected' : ''}`}
+                            onClick={() => setTargetKey(t.key)}
+                          >
+                            <b>{t.name}</b>
+                            <small>
+                              {t.host}:{t.port} · {t.protocol}
+                            </small>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
+                  <div className="selection-block">
+                    <h3>选择中转线路</h3>
+                    <div className="selection-grid">
+                      {data.lines.map((l: any) => (
+                        <button
+                          type="button"
+                          key={l.id}
+                          className={`selection-card ${lineId === l.id ? 'selected' : ''}`}
+                          disabled={!online(l)}
+                          onClick={() => setLineId(l.id)}
+                        >
+                          <b>{l.name}</b>
+                          <small>
+                            {l.region || '优化线路'}
+                            {l.requires_front ? ' · 需自备前置机' : ''}
+                          </small>
+                          <span className={online(l) ? 'good' : ''}>
+                            {online(l) ? '在线可用' : '当前离线'}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="privacy-line">
                     <LockKeyhole size={14} />
                     <span>
@@ -673,12 +702,13 @@ export default function Dashboard() {
                   ) : (
                     <div className="checkout-row">
                       <span>
-                        {activeSubscription.line_name} · 有效至{' '}
-                        {stamp(activeSubscription.expires_at)}
+                        套餐有效至 {stamp(activeSubscription.expires_at)}
                         <small>更换目标会让旧 IP、旧端口和旧配置立即失效</small>
                       </span>
                       <Button
-                        disabled={busy || !parsed || !target}
+                        disabled={
+                          busy || !parsed || !target || !line || !online(line)
+                        }
                         onClick={bindTunnel}
                       >
                         保存并应用隧道 <ArrowRight size={16} />
@@ -760,59 +790,62 @@ export default function Dashboard() {
                   <h2>购买套餐</h2>
                   <span>先购买有效天数，再配置隧道</span>
                 </div>
-                <div className="form-grid mt-5">
-                  <Field label="选择线路">
-                    <Picker
-                      value={lineId}
-                      onChange={setLineId}
-                      options={data.lines
-                        .filter((l: any) => l.enabled && online(l))
-                        .map((l: any) => ({
-                          value: l.id,
-                          label: `${l.name} · ${l.region}${l.requires_front ? ' · 需前置机' : ''}`,
-                        }))}
-                    />
-                  </Field>
-                  <Field label="选择套餐">
-                    <Picker
-                      value={planId}
-                      onChange={setPlanId}
-                      options={data.plans
-                        .filter((p: any) => !(p.trial && user.trial_used))
-                        .map((p: any) => ({
-                          value: p.id,
-                          label: `${p.name} · ${p.days} 天 · ${p.traffic_gb ? p.traffic_gb + ' GB' : '不限流量'} · ${p.price_cents === 0 ? '免费' : money(p.price_cents)}`,
-                        }))}
-                    />
-                  </Field>
+                <div className="selection-block mt-5">
+                  <h3>选择套餐时长</h3>
+                  <div className="selection-grid plan-selection-grid">
+                    {data.plans
+                      .filter((p: any) => !(p.trial && user.trial_used))
+                      .map((p: any) => (
+                        <button
+                          type="button"
+                          key={p.id}
+                          className={`selection-card plan-selection-card ${planId === p.id ? 'selected' : ''}`}
+                          onClick={() => setPlanId(p.id)}
+                        >
+                          <b>{p.name}</b>
+                          <strong>{p.days} 天</strong>
+                          <small>
+                            {p.speed_mbps} Mbps ·{' '}
+                            {p.traffic_gb ? `${p.traffic_gb} GB` : '不限流量'}
+                          </small>
+                          <span>
+                            {p.price_cents === 0
+                              ? '免费'
+                              : money(p.price_cents)}
+                          </span>
+                        </button>
+                      ))}
+                  </div>
                 </div>
                 {plan && plan.price_cents > 0 && (
-                  <div className="mt-5">
-                    <Picker
-                      value={channel}
-                      onChange={setChannel}
-                      options={[
-                        ...(settings.epay_alipay
-                          ? [{ value: 'alipay', label: '支付宝' }]
-                          : []),
-                        ...(settings.epay_wxpay
-                          ? [{ value: 'wxpay', label: '微信支付' }]
-                          : []),
-                      ]}
-                    />
+                  <div className="selection-block mt-5">
+                    <h3>选择支付方式</h3>
+                    <div className="selection-grid payment-selection-grid">
+                      {[
+                        ...(settings.epay_alipay ? [['alipay', '支付宝']] : []),
+                        ...(settings.epay_wxpay ? [['wxpay', '微信支付']] : []),
+                      ].map(([value, label]) => (
+                        <button
+                          type="button"
+                          key={value}
+                          className={`selection-card ${channel === value ? 'selected' : ''}`}
+                          onClick={() => setChannel(value)}
+                        >
+                          <b>{label}</b>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
                 <div className="checkout-row">
                   <span>
                     {plan
                       ? `${plan.days} 天 · ${plan.speed_mbps} Mbps · ${plan.traffic_gb ? plan.traffic_gb + ' GB' : '不限流量'}`
-                      : '请选择线路和套餐'}
+                      : '请选择套餐时长'}
                     <small>套餐最长 31 天；新套餐流量覆盖原额度，不叠加</small>
                   </span>
                   <Button
-                    disabled={
-                      busy || !line || !plan || !settings.terms_confirmed
-                    }
+                    disabled={busy || !plan || !settings.terms_confirmed}
                     onClick={order}
                   >
                     {plan?.price_cents === 0 ? '立即领取' : '创建订单'}
