@@ -403,10 +403,12 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
               }
             />
           </div>
-          <Button disabled={busy}>
+          <Button type="submit" disabled={busy}>
             <Save size={16} />
-            保存设置
+            {busy ? '正在保存…' : '保存设置'}
           </Button>
+          <Notice text={error} />
+          <Notice text={success} ok />
         </form>
       )}
       {tab === 'lines' && (
