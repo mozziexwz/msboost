@@ -23,6 +23,9 @@ services:
       - sqlite_data:/app/data
     networks:
       - gost-network
+    depends_on:
+      postgres:
+        condition: service_healthy
     stop_grace_period: 30s
     stop_signal: SIGTERM
     healthcheck:
