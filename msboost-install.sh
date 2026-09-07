@@ -8,7 +8,11 @@ INSTALL_DIR="${MSBOOST_INSTALL_DIR:-/opt/msboost}"
 
 die() { printf 'MSBOOST install error: %s\n' "$*" >&2; exit 1; }
 info() { printf '==> %s\n' "$*"; }
-random_value() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48; }
+# Avoid `tr | head` here: with `set -o pipefail`, head exits once it has
+# collected enough bytes and tr receives SIGPIPE, making the installer abort
+# immediately after cloning.  `od` reads a fixed amount, so the pipeline ends
+# normally on every supported Debian/Ubuntu host.
+random_value() { od -An -N24 -tx1 /dev/urandom | tr -d ' \n'; }
 
 [[ "$(id -u)" -eq 0 ]] || die "run as root"
 command -v curl >/dev/null 2>&1 || die "curl is required"
