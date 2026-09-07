@@ -12,7 +12,7 @@ new Docker deployment has passed VPS acceptance testing.
 - [x] Create the `msboost-v2` branch from FLVX 2.2.0-alpha4.
 - [x] Retain FLVX GPL-3.0, Apache-2.0, and NOTICE source attribution.
 - [ ] Rename deployment identifiers, service names, documentation and visible brand to MSBOOST.
-- [ ] Publish a self-hosted Docker Compose installer that uses this repository's release assets.
+- [x] Publish a self-hosted Docker Compose installer that builds from this repository's `msboost-v2` source branch.
 - [ ] Verify panel and agent installation on a clean Debian 12 test VPS.
 - [ ] Add MSBOOST account model: numeric QQ mailbox registration, invitation controls, optional Turnstile and agreement consent.
 - [ ] Add card-code entitlement, fixed-duration plans, expiry shutdown and traffic quota rules.

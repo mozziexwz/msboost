@@ -1,6 +1,8 @@
 services:
   backend:
-    image: ghcr.io/sagit-chu/flux-panel-backend:${FLUX_VERSION:-latest}
+    build:
+      context: ./go-backend
+    image: msboost/backend:${MSBOOST_VERSION:-dev}
     container_name: msboost-backend
     restart: unless-stopped
     logging:
@@ -55,7 +57,9 @@ services:
       start_period: 20s
 
   frontend:
-    image: ghcr.io/sagit-chu/vite-frontend:${FLUX_VERSION:-latest}
+    build:
+      context: ./vite-frontend
+    image: msboost/panel:${MSBOOST_VERSION:-dev}
     container_name: msboost-panel
     restart: unless-stopped
     logging:
