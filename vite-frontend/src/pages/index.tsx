@@ -1,107 +1,97 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { Turnstile } from "@marsidev/react-turnstile";
 import { motion } from "framer-motion";
 
-import { Card, CardBody, CardHeader } from "@/shadcn-bridge/heroui/card";
-import { Input } from "@/shadcn-bridge/heroui/input";
 import { Button } from "@/shadcn-bridge/heroui/button";
-import { siteConfig } from "@/config/site";
-import { title } from "@/components/primitives";
-import { VersionFooter } from "@/components/version-footer";
+import { Card, CardBody, CardHeader } from "@/shadcn-bridge/heroui/card";
+import { Checkbox } from "@/shadcn-bridge/heroui/checkbox";
+import { Input } from "@/shadcn-bridge/heroui/input";
 import DefaultLayout from "@/layouts/default";
-import { login, LoginData, checkCaptcha, getConfigByName } from "@/api";
+import {
+  checkCaptcha,
+  getPublicConfigByName,
+  getRegistrationSettings,
+  login,
+  registerAccount,
+  type LoginData,
+  type RegistrationSettings,
+} from "@/api";
 import { writeLoginSession } from "@/utils/session";
-import { useWebViewMode } from "@/hooks/useWebViewMode";
 
-interface LoginForm {
-  username: string;
-  password: string;
-  captchaId: string;
-}
+type Mode = "login" | "register";
+
+const numericQQMailbox = /^[0-9]+@qq\.com$/;
 
 export default function IndexPage() {
-  const [form, setForm] = useState<LoginForm>({
+  const navigate = useNavigate();
+  const [mode, setMode] = useState<Mode>("login");
+  const [loading, setLoading] = useState(false);
+  const [showLoginCaptcha, setShowLoginCaptcha] = useState(false);
+  const [loginSiteKey, setLoginSiteKey] = useState("");
+  const [registrationSettings, setRegistrationSettings] =
+    useState<RegistrationSettings | null>(null);
+  const [loginForm, setLoginForm] = useState({
     username: "",
     password: "",
     captchaId: "",
   });
-  const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<Partial<LoginForm>>({});
-  const [showCaptcha, setShowCaptcha] = useState(false);
-  const [siteKey, setSiteKey] = useState("");
-  const navigate = useNavigate();
-  const isWebView = useWebViewMode();
+  const [registerForm, setRegisterForm] = useState({
+    email: "",
+    password: "",
+    confirmPassword: "",
+    inviteCode: "",
+    turnstileToken: "",
+    agreementAccepted: false,
+  });
 
-  // 验证表单
-  const validateForm = (): boolean => {
-    const newErrors: Partial<LoginForm> = {};
+  useEffect(() => {
+    void getRegistrationSettings().then((response) => {
+      if (response.code === 0) setRegistrationSettings(response.data);
+    });
+  }, []);
 
-    if (!form.username.trim()) {
-      newErrors.username = "请输入用户名";
+  const completeLogin = async (captchaToken?: string) => {
+    const payload: LoginData = {
+      username: loginForm.username.trim(),
+      password: loginForm.password,
+      captchaId: captchaToken || loginForm.captchaId,
+    };
+    const response = await login(payload);
+    if (response.code !== 0) {
+      toast.error(response.msg || "登录失败");
+      setLoginForm((current) => ({ ...current, captchaId: "" }));
+      return;
     }
-
-    if (!form.password.trim()) {
-      newErrors.password = "请输入密码";
-    } else if (form.password.length < 6) {
-      newErrors.password = "密码长度至少6位";
-    }
-
-    setErrors(newErrors);
-
-    return Object.keys(newErrors).length === 0;
+    writeLoginSession(response.data);
+    toast.success("登录成功");
+    navigate(response.data.requirePasswordChange ? "/change-password" : "/dashboard");
   };
 
-  // 处理输入变化
-  const handleInputChange = (field: keyof LoginForm, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    // 清除该字段的错误
-    if (errors[field]) {
-      setErrors((prev) => ({ ...prev, [field]: undefined }));
+  const handleLogin = async () => {
+    if (!loginForm.username.trim() || !loginForm.password) {
+      toast.error("请输入账号和密码");
+      return;
     }
-  };
-
-  // 执行登录请求
-  const performLogin = async (captchaToken?: string) => {
+    setLoading(true);
     try {
-      const finalCaptchaId =
-        typeof captchaToken === "string" && captchaToken.trim()
-          ? captchaToken
-          : form.captchaId;
-
-      const loginData: LoginData = {
-        username: form.username.trim(),
-        password: form.password,
-        captchaId: finalCaptchaId,
-      };
-
-      const response = await login(loginData);
-
-      if (response.code !== 0) {
-        toast.error(response.msg || "登录失败");
-        if (showCaptcha) {
-          setForm((prev) => ({ ...prev, captchaId: "" }));
-        }
-
+      const captcha = await checkCaptcha();
+      if (captcha.code !== 0) {
+        toast.error(captcha.msg || "无法检查验证码状态");
         return;
       }
-
-      // 检查是否需要强制修改密码
-      if (response.data.requirePasswordChange) {
-        writeLoginSession(response.data);
-        toast.success("检测到默认密码，即将跳转到修改密码页面");
-        navigate("/change-password");
-
+      if (captcha.data === 0) {
+        await completeLogin();
         return;
       }
-
-      // 保存登录信息
-      writeLoginSession(response.data);
-
-      // 登录成功
-      toast.success("登录成功");
-      navigate("/dashboard");
+      const siteKey = await getPublicConfigByName("cloudflare_site_key");
+      if (siteKey.code !== 0 || !siteKey.data?.value) {
+        toast.error("管理员尚未完成登录验证码配置");
+        return;
+      }
+      setLoginSiteKey(siteKey.data.value);
+      setShowLoginCaptcha(true);
     } catch {
       toast.error("网络错误，请稍后重试");
     } finally {
@@ -109,172 +99,241 @@ export default function IndexPage() {
     }
   };
 
-  const handleLogin = async () => {
-    if (!validateForm()) return;
+  const handleRegister = async () => {
+    const settings = registrationSettings;
+    if (!settings?.enabled) {
+      toast.error("管理员暂未开放注册");
+      return;
+    }
+    const email = registerForm.email.trim().toLowerCase();
+    if (!numericQQMailbox.test(email)) {
+      toast.error("仅支持纯数字 QQ 邮箱，例如 123456@qq.com");
+      return;
+    }
+    if (registerForm.password.length < 8) {
+      toast.error("密码至少需要 8 位");
+      return;
+    }
+    if (registerForm.password !== registerForm.confirmPassword) {
+      toast.error("两次密码输入不一致");
+      return;
+    }
+    if (!registerForm.agreementAccepted) {
+      toast.error("请先阅读并同意服务协议");
+      return;
+    }
+    if (settings.turnstileEnabled && !registerForm.turnstileToken) {
+      toast.error("请先完成 Turnstile 验证");
+      return;
+    }
 
     setLoading(true);
-
     try {
-      // 先检查是否需要验证码
-      const checkResponse = await checkCaptcha();
-
-      if (checkResponse.code !== 0) {
-        toast.error("检查验证码状态失败，请重试" + checkResponse.msg);
-        setLoading(false);
-
+      const response = await registerAccount({
+        email,
+        password: registerForm.password,
+        inviteCode: registerForm.inviteCode,
+        turnstileToken: registerForm.turnstileToken,
+        agreementAccepted: registerForm.agreementAccepted,
+      });
+      if (response.code !== 0) {
+        toast.error(response.msg || "注册失败");
         return;
       }
-
-      // 根据返回值决定是否显示验证码
-      if (checkResponse.data === 0) {
-        await performLogin();
-      } else {
-        const configResp = await getConfigByName("cloudflare_site_key");
-
-        if (configResp.code === 0 && configResp.data && configResp.data.value) {
-          setSiteKey(configResp.data.value);
-          setShowCaptcha(true);
-        } else {
-          toast.error("未配置Cloudflare Site Key，请联系管理员");
-          setLoading(false);
-        }
-      }
-    } catch (error) {
-      toast.error("网络错误，请稍后重试" + error);
+      setLoginForm({ username: email, password: "", captchaId: "" });
+      setMode("login");
+      toast.success("注册成功，请登录后使用卡密开通套餐");
+    } catch {
+      toast.error("网络错误，请稍后重试");
+    } finally {
       setLoading(false);
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !loading) {
-      handleLogin();
-    }
+  const switchMode = (next: Mode) => {
+    setShowLoginCaptcha(false);
+    setMode(next);
   };
 
   return (
     <DefaultLayout>
-      <section className="flex flex-col items-center justify-center gap-4 py-4 sm:py-8 md:py-10 pb-20 min-h-[calc(100dvh-120px)] sm:min-h-[calc(100dvh-200px)]">
+      <section className="flex min-h-[calc(100dvh-120px)] items-center justify-center py-10 sm:min-h-[calc(100dvh-200px)]">
         <motion.div
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md px-4 sm:px-0"
-          initial={{ opacity: 0, y: 24 }}
-          transition={{ duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] }}
+          initial={{ opacity: 0, y: 20 }}
+          transition={{ duration: 0.3 }}
         >
-          <Card className="w-full">
-            <CardHeader className="pb-0 pt-6 px-6 flex-col items-center">
-              <h1 className={title({ size: "sm" })}>登陆</h1>
-              <p className="text-small text-default-500 mt-2">
-                请输入您的账号信息
+          <Card className="w-full border border-primary-100 shadow-xl">
+            <CardHeader className="flex flex-col items-center gap-2 px-6 pb-2 pt-7 text-center">
+              <span className="rounded-full bg-primary-100 px-3 py-1 text-xs font-semibold tracking-[0.18em] text-primary-700 dark:bg-primary-900/40 dark:text-primary-200">
+                MSBOOST
+              </span>
+              <h1 className="text-2xl font-bold tracking-tight">
+                {mode === "login" ? "登录你的专属游戏节点" : "创建 MSBOOST 账号"}
+              </h1>
+              <p className="text-sm text-default-500">
+                {mode === "login"
+                  ? "登录后可部署节点、使用卡密并管理隧道中转。"
+                  : "仅支持纯数字 QQ 邮箱注册；请先确认你已自备服务器。"}
               </p>
             </CardHeader>
-            <CardBody className="px-6 py-6">
-              <div className="flex flex-col gap-4">
-                <Input
-                  errorMessage={errors.username}
-                  isDisabled={loading}
-                  isInvalid={!!errors.username}
-                  label="用户名"
-                  placeholder="请输入用户名"
-                  value={form.username}
-                  variant="bordered"
-                  onChange={(e) =>
-                    handleInputChange("username", e.target.value)
-                  }
-                  onKeyDown={handleKeyPress}
-                />
-
-                <Input
-                  isDisabled={loading}
-                  isInvalid={!!errors.password}
-                  label="密码"
-                  placeholder="请输入密码"
-                  type="password"
-                  value={form.password}
-                  variant="bordered"
-                  onChange={(e) =>
-                    handleInputChange("password", e.target.value)
-                  }
-                  onKeyDown={handleKeyPress}
-                />
-
-                <Button
-                  className="mt-2"
-                  color="primary"
-                  disabled={loading}
-                  isLoading={loading}
-                  size="lg"
-                  onPress={handleLogin}
-                >
-                  {loading ? (showCaptcha ? "验证中..." : "登录中...") : "登录"}
-                </Button>
-              </div>
+            <CardBody className="space-y-4 px-6 pb-7 pt-5">
+              {mode === "login" ? (
+                <>
+                  <Input
+                    isDisabled={loading}
+                    label="账号"
+                    placeholder="管理员账号或 QQ 邮箱"
+                    value={loginForm.username}
+                    variant="bordered"
+                    onChange={(event) =>
+                      setLoginForm((current) => ({ ...current, username: event.target.value }))
+                    }
+                  />
+                  <Input
+                    isDisabled={loading}
+                    label="密码"
+                    placeholder="请输入密码"
+                    type="password"
+                    value={loginForm.password}
+                    variant="bordered"
+                    onChange={(event) =>
+                      setLoginForm((current) => ({ ...current, password: event.target.value }))
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !loading) void handleLogin();
+                    }}
+                  />
+                  <Button
+                    className="w-full"
+                    color="primary"
+                    isLoading={loading}
+                    size="lg"
+                    onPress={() => void handleLogin()}
+                  >
+                    登录
+                  </Button>
+                  <p className="text-center text-sm text-default-500">
+                    还没有账号？{" "}
+                    <button className="font-medium text-primary" type="button" onClick={() => switchMode("register")}>
+                      注册账号
+                    </button>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Input
+                    isDisabled={loading}
+                    label="QQ 邮箱"
+                    placeholder="123456@qq.com"
+                    value={registerForm.email}
+                    variant="bordered"
+                    onChange={(event) =>
+                      setRegisterForm((current) => ({ ...current, email: event.target.value }))
+                    }
+                  />
+                  <Input
+                    isDisabled={loading}
+                    label="设置密码"
+                    placeholder="至少 8 位"
+                    type="password"
+                    value={registerForm.password}
+                    variant="bordered"
+                    onChange={(event) =>
+                      setRegisterForm((current) => ({ ...current, password: event.target.value }))
+                    }
+                  />
+                  <Input
+                    isDisabled={loading}
+                    label="确认密码"
+                    placeholder="再次输入密码"
+                    type="password"
+                    value={registerForm.confirmPassword}
+                    variant="bordered"
+                    onChange={(event) =>
+                      setRegisterForm((current) => ({ ...current, confirmPassword: event.target.value }))
+                    }
+                  />
+                  {registrationSettings?.inviteRequired && (
+                    <Input
+                      isDisabled={loading}
+                      label="邀请码"
+                      placeholder="请输入邀请码"
+                      value={registerForm.inviteCode}
+                      variant="bordered"
+                      onChange={(event) =>
+                        setRegisterForm((current) => ({ ...current, inviteCode: event.target.value }))
+                      }
+                    />
+                  )}
+                  {registrationSettings?.turnstileEnabled && registrationSettings.turnstileSiteKey && (
+                    <div className="flex justify-center overflow-hidden rounded-lg border border-default-200 p-2">
+                      <Turnstile
+                        siteKey={registrationSettings.turnstileSiteKey}
+                        onError={() => toast.error("Turnstile 验证失败，请刷新后重试")}
+                        onExpire={() =>
+                          setRegisterForm((current) => ({ ...current, turnstileToken: "" }))
+                        }
+                        onSuccess={(token) =>
+                          setRegisterForm((current) => ({ ...current, turnstileToken: token }))
+                        }
+                      />
+                    </div>
+                  )}
+                  <Checkbox
+                    isSelected={registerForm.agreementAccepted}
+                    onValueChange={(accepted) =>
+                      setRegisterForm((current) => ({ ...current, agreementAccepted: accepted }))
+                    }
+                  >
+                    我已阅读并同意服务协议、隐私政策与可接受使用政策
+                  </Checkbox>
+                  <Button
+                    className="w-full"
+                    color="primary"
+                    isDisabled={registrationSettings?.enabled === false}
+                    isLoading={loading}
+                    size="lg"
+                    onPress={() => void handleRegister()}
+                  >
+                    {registrationSettings?.enabled === false ? "注册暂未开放" : "创建账号"}
+                  </Button>
+                  <p className="text-center text-sm text-default-500">
+                    已有账号？{" "}
+                    <button className="font-medium text-primary" type="button" onClick={() => switchMode("login")}>
+                      返回登录
+                    </button>
+                  </p>
+                </>
+              )}
             </CardBody>
           </Card>
         </motion.div>
+      </section>
 
-        {/* 版权信息 - 固定在底部，不占据布局空间 */}
-
-        <VersionFooter
-          containerClassName="fixed inset-x-0 bottom-4 text-center py-4"
-          poweredClassName="text-xs text-gray-400 dark:text-gray-500"
-          updateBadgeClassName="ml-2 inline-flex items-center rounded-full bg-rose-500/90 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-white"
-          version={isWebView ? siteConfig.app_version : siteConfig.version}
-          versionClassName="text-xs text-gray-400 dark:text-gray-500 mt-1"
-        />
-
-        {/* 验证码弹层 */}
-        {showCaptcha && siteKey && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            {/* 背景遮罩层 - 模糊效果，暗黑模式下更深 */}
-            <button
-              className="absolute inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm captcha-backdrop-enter"
-              type="button"
-              onClick={() => {
-                setShowCaptcha(false);
-                setLoading(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  setShowCaptcha(false);
-                  setLoading(false);
-                }
-              }}
-            />
-            {/* 验证码容器 */}
-            <div className="mb-4 relative z-50 bg-white dark:bg-zinc-900 p-6 rounded-lg shadow-xl">
-              <div className="mb-4 text-center text-sm font-medium text-gray-700 dark:text-gray-200">
-                请完成安全验证
-              </div>
-              <div className="flex justify-center">
-                <Turnstile
-                  options={{
-                    theme: (document.documentElement.classList.contains(
-                      "dark",
-                    ) ||
-                    document.documentElement.getAttribute("data-theme") ===
-                      "dark" ||
-                    window.matchMedia("(prefers-color-scheme: dark)").matches
-                      ? "dark"
-                      : "light") as "light" | "dark" | "auto",
-                  }}
-                  siteKey={siteKey}
-                  onError={() => {
-                    toast.error("验证失败，请刷新重试");
-                    setLoading(false);
-                  }}
-                  onExpire={() => {
-                    setForm((prev) => ({ ...prev, captchaId: "" }));
-                  }}
-                  onSuccess={(token) => {
-                    setForm((prev) => ({ ...prev, captchaId: token }));
-                    void performLogin(token);
-                  }}
-                />
-              </div>
+      {showLoginCaptcha && loginSiteKey && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl dark:bg-zinc-900">
+            <p className="mb-4 text-center text-sm font-medium">请完成安全验证</p>
+            <div className="flex justify-center">
+              <Turnstile
+                siteKey={loginSiteKey}
+                onError={() => {
+                  toast.error("验证失败，请刷新重试");
+                  setShowLoginCaptcha(false);
+                }}
+                onExpire={() => setLoginForm((current) => ({ ...current, captchaId: "" }))}
+                onSuccess={(token) => {
+                  setShowLoginCaptcha(false);
+                  setLoading(true);
+                  void completeLogin(token).finally(() => setLoading(false));
+                }}
+              />
             </div>
           </div>
-        )}
-      </section>
+        </div>
+      )}
     </DefaultLayout>
   );
 }

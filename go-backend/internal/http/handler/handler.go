@@ -126,6 +126,9 @@ func (h *Handler) WebSocketHandler() http.Handler {
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/user/login", h.login)
+	mux.HandleFunc("/api/v1/registration/settings", h.registrationSettings)
+	mux.HandleFunc("/api/v1/registration", h.registrationCreate)
+	mux.HandleFunc("/api/v1/public/config/get", h.getPublicConfigByName)
 	mux.HandleFunc("/api/v1/user/list", h.userList)
 	mux.HandleFunc("/api/v1/user/create", h.userCreate)
 	mux.HandleFunc("/api/v1/user/update", h.userUpdate)
@@ -361,6 +364,48 @@ func (h *Handler) getConfigByName(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.WriteJSON(w, response.OK(cfg))
+}
+
+// getPublicConfigByName deliberately exposes only the branding and public
+// Turnstile key required before a visitor has signed in.  Keep secrets and
+// operational configuration behind the authenticated /config/get endpoint.
+func (h *Handler) getPublicConfigByName(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		response.WriteJSON(w, response.ErrDefault("请求失败"))
+		return
+	}
+
+	var req nameRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		response.WriteJSON(w, response.ErrDefault("配置名称不能为空"))
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if !isPublicConfigName(name) {
+		response.WriteJSON(w, response.Err(http.StatusForbidden, "该配置不可公开读取"))
+		return
+	}
+
+	cfg, err := h.repo.GetConfigByName(name)
+	if err != nil {
+		response.WriteJSON(w, response.Err(-2, err.Error()))
+		return
+	}
+	if cfg == nil {
+		response.WriteJSON(w, response.ErrDefault("配置不存在"))
+		return
+	}
+
+	response.WriteJSON(w, response.OK(cfg))
+}
+
+func isPublicConfigName(name string) bool {
+	switch name {
+	case "app_name", "app_logo", "app_favicon", "cloudflare_site_key":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *Handler) getConfigs(w http.ResponseWriter, r *http.Request) {
@@ -864,6 +909,12 @@ func (h *Handler) updateSingleConfig(w http.ResponseWriter, r *http.Request) {
 
 func normalizeAndValidateConfigValue(key, value string) (string, error) {
 	switch strings.TrimSpace(key) {
+	case "registration_enabled", "registration_invite_required", "registration_turnstile_enabled":
+		normalized := strings.TrimSpace(strings.ToLower(value))
+		if normalized != "true" && normalized != "false" {
+			return "", fmt.Errorf("注册开关配置值无效")
+		}
+		return normalized, nil
 	case "app_logo", "app_favicon":
 		normalized := strings.TrimSpace(value)
 		if normalized == "" {

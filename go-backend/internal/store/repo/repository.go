@@ -309,6 +309,22 @@ func seedData(db *gorm.DB) {
 
 	appNameConfig := model.ViteConfig{ID: 1, Name: "app_name", Value: "MSBOOST", Time: 1755147963000}
 	db.Where("id = ?", 1).FirstOrCreate(&appNameConfig)
+	// Existing FLVX databases are migrated to the MSBOOST default once. A
+	// later administrator change is preserved because only the inherited
+	// literal value is replaced.
+	_ = db.Model(&model.ViteConfig{}).
+		Where("name = ? AND value IN ?", "app_name", []string{"flux", "FLVX"}).
+		Update("value", "MSBOOST").Error
+
+	registrationDefaults := []model.ViteConfig{
+		{Name: "registration_enabled", Value: "true", Time: 1755147963000},
+		{Name: "registration_invite_required", Value: "false", Time: 1755147963000},
+		{Name: "registration_invite_code", Value: "", Time: 1755147963000},
+		{Name: "registration_turnstile_enabled", Value: "false", Time: 1755147963000},
+	}
+	for _, cfg := range registrationDefaults {
+		db.Where("name = ?", cfg.Name).FirstOrCreate(&cfg)
+	}
 }
 
 // ─── User Queries ────────────────────────────────────────────────────

@@ -66,6 +66,28 @@ export interface LoginResponse {
 export const login = (data: LoginData) =>
   Network.post<LoginResponse>("/user/login", data);
 
+export interface RegistrationSettings {
+  enabled: boolean;
+  inviteRequired: boolean;
+  turnstileEnabled: boolean;
+  turnstileSiteKey: string;
+}
+
+export interface RegistrationData {
+  email: string;
+  password: string;
+  inviteCode: string;
+  turnstileToken: string;
+  agreementAccepted: boolean;
+}
+
+export const getRegistrationSettings = () =>
+  Network.get<RegistrationSettings>("/registration/settings");
+export const registerAccount = (data: RegistrationData) =>
+  Network.post<{ id: number; message: string }>("/registration", data);
+export const getPublicConfigByName = (name: string) =>
+  Network.post<{ name: string; value: string }>("/public/config/get", { name });
+
 // 用户CRUD操作 - 全部使用POST请求
 export const createUser = (data: UserMutationPayload) =>
   Network.post("/user/create", data);

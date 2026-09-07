@@ -77,9 +77,11 @@ func shouldSkip(path string) bool {
 		return true
 	case strings.HasPrefix(path, "/api/v1/captcha/"):
 		return true
-	case path == "/api/v1/config/get":
+	case path == "/api/v1/public/config/get":
 		return true
 	case path == "/api/v1/user/login":
+		return true
+	case strings.HasPrefix(path, "/api/v1/registration"):
 		return true
 	case path == "/api/v1/federation/connect":
 		return true

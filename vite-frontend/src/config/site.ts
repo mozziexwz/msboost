@@ -1,4 +1,4 @@
-import { getConfigByName, getConfigs } from "@/api";
+import { getPublicConfigByName, getConfigs } from "@/api";
 
 export type SiteConfig = typeof siteConfig;
 
@@ -95,7 +95,7 @@ export const getCachedConfig = async (key: string): Promise<string | null> => {
     return cachedValue;
   }
 
-  const response = await getConfigByName(key);
+  const response = await getPublicConfigByName(key);
 
   if (
     response.code === 0 &&
@@ -134,7 +134,7 @@ export const getCachedConfigs = async (): Promise<Record<string, string>> => {
     await Promise.all(
       configKeys.map(async (key) => {
         try {
-          const response = await getConfigByName(key);
+          const response = await getPublicConfigByName(key);
 
           if (
             response.code === 0 &&
