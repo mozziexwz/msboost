@@ -1,5 +1,25 @@
 # MSBOOST
 
+> **迁移状态：** 当前根目录是旧 Cloudflare Sites 版本的归档。新的 VPS 自建测试入口位于 [`selfhost/`](selfhost/)，它固定使用 FLVX `2.2.0-alpha4` 的 Docker 基础，尚未包含旧版所有 MSBOOST 业务定制。不要把它当作已完成的正式商业版本。
+
+## Docker 自建测试（第一阶段）
+
+在一台全新 Debian 12 测试 VPS 上，以 root 执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mozziexwz/msboost/main/install.sh | bash
+```
+
+安装脚本会安装 Docker（如尚未安装）、生成 PostgreSQL/JWT 随机密钥、启动面板与数据库。默认面板端口是 `6366`，后端端口是 `6365`；请仅在测试环境开放它们。部署完成后先修改默认管理员密码，并保留 [`selfhost/NOTICE-FLVX.md`](selfhost/NOTICE-FLVX.md) 中的上游授权声明。
+
+更新测试版：
+
+```bash
+cd /opt/msboost && docker compose pull && docker compose up -d
+```
+
+回滚方式是在 `.env` 中把 `FLVX_VERSION` 改回之前验证过的版本后执行上述更新命令。数据库卷不会因更新自动删除。完整卸载或删除卷会清空数据，务必先备份。
+
 面向 msboost.de 的登录制游戏节点与隧道销售站。网站使用 D1 保存业务记录，R2 保存 AES-GCM 加密后的付费配置；运营 VPS 运行一次性 SSH 作业服务，中转 VPS 运行独立 `msboostgost.service`。
 
 ## 已实现

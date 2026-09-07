@@ -1,0 +1,69 @@
+# MSBOOST self-hosted bootstrap
+#
+# This compose file deliberately pins the FLVX base to 2.2.0-alpha4.  It is
+# a migration foundation: FLVX provides the forwarding/node core while the
+# MSBOOST-specific account, card-code and VPS-deployment features are added in
+# subsequent releases.  See selfhost/NOTICE-FLVX.md before distributing it.
+services:
+  backend:
+    image: ghcr.io/sagit-chu/flux-panel-backend:${FLVX_VERSION:-2.2.0-alpha4}
+    container_name: msboost-backend
+    restart: unless-stopped
+    environment:
+      DB_TYPE: postgres
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET}
+      SERVER_ADDR: :6365
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${BACKEND_PORT:-6365}:6365"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - msboost
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget --no-verbose --tries=1 --spider http://localhost:6365/flow/test || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    image: ghcr.io/sagit-chu/vite-frontend:${FLVX_VERSION:-2.2.0-alpha4}
+    container_name: msboost-panel
+    restart: unless-stopped
+    ports:
+      - "${PANEL_PORT:-6366}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - msboost
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: msboost-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - msboost_postgres:/var/lib/postgresql/data
+    networks:
+      - msboost
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  msboost_postgres:
+
+networks:
+  msboost:
+    name: msboost-network
