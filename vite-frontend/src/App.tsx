@@ -15,6 +15,7 @@ import LimitPage from "@/pages/limit";
 import ConfigPage from "@/pages/config";
 import PanelSharingPage from "@/pages/panel-sharing";
 import { SettingsPage } from "@/pages/settings";
+import BillingPage from "@/pages/billing";
 import AdminLayout from "@/layouts/admin";
 import H5Layout from "@/layouts/h5";
 import H5SimpleLayout from "@/layouts/h5-simple";
@@ -122,6 +123,14 @@ function App() {
           </ProtectedRoute>
         }
         path="/dashboard"
+      />
+      <Route
+        element={
+          <ProtectedRoute>
+            <BillingPage />
+          </ProtectedRoute>
+        }
+        path="/billing"
       />
       <Route
         element={

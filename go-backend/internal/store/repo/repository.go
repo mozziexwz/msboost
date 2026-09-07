@@ -54,6 +54,8 @@ type TunnelMetric = model.TunnelMetric
 type ServiceMonitor = model.ServiceMonitor
 type ServiceMonitorResult = model.ServiceMonitorResult
 type TunnelQuality = model.TunnelQuality
+type Plan = model.Plan
+type Card = model.Card
 
 // ─── Repository ──────────────────────────────────────────────────────
 
@@ -168,6 +170,8 @@ func (r *Repository) Close() error {
 func autoMigrateAll(db *gorm.DB) error {
 	models := []interface{}{
 		&model.User{},
+		&model.Plan{},
+		&model.Card{},
 		&model.UserQuota{},
 		&model.Forward{},
 		&model.ForwardPort{},

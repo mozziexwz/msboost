@@ -88,6 +88,55 @@ export const registerAccount = (data: RegistrationData) =>
 export const getPublicConfigByName = (name: string) =>
   Network.post<{ name: string; value: string }>("/public/config/get", { name });
 
+export interface PlanData {
+  id: number;
+  name: string;
+  days: number;
+  flowGB: number;
+  bandwidthMbps: number;
+  priceCents: number;
+  enabled: number;
+  trial: number;
+  sortOrder: number;
+  createdTime: number;
+  updatedTime: number;
+}
+
+export interface PlanMutationData {
+  id?: number;
+  name: string;
+  days: number;
+  flowGB: number;
+  bandwidthMbps: number;
+  priceCents: number;
+  enabled: number;
+  trial: number;
+  sortOrder: number;
+}
+
+export interface CardRecord {
+  id: number;
+  planId: number;
+  planName: string;
+  status: number;
+  redeemedByUserId: number;
+  redeemedTime: number;
+  createdTime: number;
+}
+
+export const getPlans = () => Network.post<PlanData[]>("/plan/list");
+export const createPlan = (data: PlanMutationData) =>
+  Network.post<PlanData>("/plan/create", data);
+export const updatePlan = (data: PlanMutationData & { id: number }) =>
+  Network.post<PlanData>("/plan/update", data);
+export const deletePlan = (id: number) => Network.post("/plan/delete", { id });
+export const generateCards = (planId: number, count: number) =>
+  Network.post<{ codes: string[]; message: string }>("/card/generate", { planId, count });
+export const getCards = (planId = 0) =>
+  Network.post<CardRecord[]>("/card/list", { planId });
+export const redeemCard = (code: string) =>
+  Network.post<{ plan: PlanData; message: string }>("/card/redeem", { code });
+
 // 用户CRUD操作 - 全部使用POST请求
 export const createUser = (data: UserMutationPayload) =>
   Network.post("/user/create", data);

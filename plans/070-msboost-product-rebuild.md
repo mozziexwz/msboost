@@ -11,9 +11,11 @@ traffic accounting and node-control transport from the FLVX base.
 - [ ] Replace the public login and customer navigation with the MSBOOST product
   surface: 教程（必看）, VPS 节点部署, 套餐与卡密, 隧道中转, 工单/账户.
 - [ ] Add public registration for numeric QQ mailboxes only, service-agreement
-  acceptance, configurable invitations and optional Turnstile.
+  acceptance, configurable invitations and optional Turnstile. (Implemented;
+  awaiting clean-VPS acceptance test.)
 - [ ] Add administrator-managed card codes and 1–31 day plans, including
   zero-price trial rules, replacement traffic quotas and expiry enforcement.
+  (Implemented; awaiting clean-VPS acceptance test.)
 - [ ] Build customer tunnel creation on top of the existing relay runtime:
   exactly one target IP and port per customer, chosen line, rate/traffic data,
   configuration download and removal on expiry.

@@ -27,6 +27,40 @@ type User struct {
 
 func (User) TableName() string { return "user" }
 
+// Plan is an administrator-managed MSBOOST access plan.  Flow is expressed
+// in GiB and is deliberately replaced (rather than accumulated) when a card
+// is redeemed, matching the customer-facing package rules.
+type Plan struct {
+	ID            int64  `gorm:"primaryKey;autoIncrement"`
+	Name          string `gorm:"type:varchar(100);not null"`
+	Days          int    `gorm:"not null"`
+	FlowGB        int64  `gorm:"column:flow_gb;not null"`
+	BandwidthMbps int    `gorm:"column:bandwidth_mbps;not null;default:0"`
+	PriceCents    int64  `gorm:"column:price_cents;not null;default:0"`
+	Enabled       int    `gorm:"not null;default:1"`
+	Trial         int    `gorm:"not null;default:0"`
+	SortOrder     int    `gorm:"column:sort_order;not null;default:0"`
+	CreatedTime   int64  `gorm:"column:created_time;not null"`
+	UpdatedTime   int64  `gorm:"column:updated_time;not null"`
+}
+
+func (Plan) TableName() string { return "plan" }
+
+// Card stores a one-time redemption code only as a SHA-256 digest.  Raw
+// values are returned to the administrator when generated and are never
+// recoverable from the database.
+type Card struct {
+	ID               int64 `gorm:"primaryKey;autoIncrement"`
+	CodeHash         string `gorm:"column:code_hash;type:char(64);not null;uniqueIndex"`
+	PlanID           int64  `gorm:"column:plan_id;not null;index"`
+	Status           int    `gorm:"not null;default:0"`
+	RedeemedByUserID int64  `gorm:"column:redeemed_by_user_id;not null;default:0;index"`
+	RedeemedTime     int64  `gorm:"column:redeemed_time;not null;default:0"`
+	CreatedTime      int64  `gorm:"column:created_time;not null"`
+}
+
+func (Card) TableName() string { return "card" }
+
 // Forward maps to the "forward" table.
 type Forward struct {
 	ID          int64         `gorm:"primaryKey;autoIncrement"`

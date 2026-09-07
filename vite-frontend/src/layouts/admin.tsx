@@ -81,6 +81,15 @@ export default function AdminLayout({
       ),
     },
     {
+      path: "/billing",
+      label: "套餐与卡密",
+      icon: (
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M3 5a2 2 0 012-2h10a2 2 0 012 2v2a1 1 0 000 2v2a2 2 0 01-2 2H5a2 2 0 01-2-2V9a1 1 0 000-2V5zm4 2a1 1 0 100 2h6a1 1 0 100-2H7z" />
+        </svg>
+      ),
+    },
+    {
       path: "/forward",
       label: "规则",
       icon: (
