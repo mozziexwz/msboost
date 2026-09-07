@@ -34,6 +34,7 @@ import {
   money,
 } from './widgets';
 export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
+  const relayApiOrigin = 'https://panel.msboost.de';
   const [data, setData] = useState<any>(null),
     [tab, setTab] = useState('settings'),
     [error, setError] = useState(''),
@@ -66,7 +67,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
       if (r.node_token)
         setSecret({
           title: `线路 ID：${r.id || b.id}`,
-          command: `curl -fsSL '${location.origin}/relay-install.sh' | bash -s -- '${location.origin}' '${r.node_token}' '${b.probe_ip || ''}'`,
+          command: `curl -fsSL '${location.origin}/relay-install.sh' | bash -s -- '${relayApiOrigin}' '${r.node_token}' '${b.probe_ip || ''}' '${location.origin}'`,
         });
       setSuccess(r.message || '已保存');
       setEdit(null);

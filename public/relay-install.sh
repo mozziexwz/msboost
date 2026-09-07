@@ -5,7 +5,9 @@ umask 077
 ORIGIN="${1:-}"
 NODE_TOKEN="${2:-}"
 PROBE_IP="${3:-}"
+ASSET_ORIGIN="${4:-$ORIGIN}"
 [[ "$ORIGIN" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || { echo '站点地址无效'; exit 1; }
+[[ "$ASSET_ORIGIN" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || { echo '安装资源地址无效'; exit 1; }
 [[ "$NODE_TOKEN" =~ ^[a-f0-9]{64}$ ]] || { echo '线路令牌无效'; exit 1; }
 [[ -z "$PROBE_IP" || "$PROBE_IP" =~ ^[0-9a-fA-F:.]+$ ]] || { echo '探测地址无效'; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
@@ -22,7 +24,7 @@ STAGE="$(mktemp -d /tmp/msboost-relay.XXXXXX)"
 cleanup() { rm -rf -- "$STAGE"; }
 trap cleanup EXIT
 for file in relay.py assets.py install-binary.py msboostgost.service; do
-  curl -fsSL --retry 3 "$ORIGIN/relay-assets/$file" -o "$STAGE/$file"
+  curl -fsSL --retry 3 "$ASSET_ORIGIN/relay-assets/$file" -o "$STAGE/$file"
 done
 install -m 0644 "$STAGE/relay.py" /opt/msboost/relay.py
 install -m 0644 "$STAGE/assets.py" /opt/msboost/assets.py

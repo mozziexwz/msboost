@@ -40,6 +40,8 @@ class OperationsTests(unittest.TestCase):
         self.assertIn('/opt/msboost/relay.py', script)
         self.assertIn('/opt/msboost/assets.py', script)
         self.assertNotIn('/tmp/msboost-install-binary.py', script)
+        self.assertIn('ASSET_ORIGIN="${4:-$ORIGIN}"', script)
+        self.assertIn('"$ASSET_ORIGIN/relay-assets/$file"', script)
 
     def test_game_allowlist_precedes_gfw_rejection_without_shared_ip_pins(self):
         script = (Path(__file__).resolve().parents[1] / 'ops' / 'remote-install.sh').read_text(encoding='utf-8')
