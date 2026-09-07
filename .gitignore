@@ -285,3 +285,4 @@ go-backend/gost.db-wal
 /outputs/
 /next-env.d.ts
 /tests/__pycache__/
+/test-results/
