@@ -38,6 +38,21 @@ PROBE_IP=$PROBE_IP
 EOF
 chmod 0600 /etc/msboostgost/node.env
 systemctl daemon-reload
-systemctl enable --now msboostgost.service
+systemctl enable msboostgost.service
+systemctl restart msboostgost.service
 systemctl is-active --quiet msboostgost.service
-echo 'MSBOOST 转发机安装完成，后台将在约 20 秒内显示在线。'
+echo 'MSBOOST 服务已启动，正在等待首次同步…'
+synced=0
+for _ in $(seq 1 12); do
+  if journalctl -u msboostgost.service --since '30 seconds ago' --no-pager | grep -q 'MSBOOST synchronization OK'; then
+    synced=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$synced" == 1 ]]; then
+  echo 'MSBOOST 转发机已成功同步，请刷新后台。'
+else
+  echo '服务已安装，但尚未确认同步成功。请查看下面的诊断信息：'
+  journalctl -u msboostgost.service -n 8 --no-pager
+fi

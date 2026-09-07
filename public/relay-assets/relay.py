@@ -13,6 +13,7 @@ import subprocess
 import threading
 import time
 import urllib.request
+import urllib.error
 from pathlib import Path
 
 def valid_ip(value):
@@ -205,10 +206,17 @@ def main():
             try:
                 begin = time.monotonic()
                 request = urllib.request.Request(origin + '/api/node/sync', data=json.dumps(payload).encode(),
-                    headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}, method='POST')
+                    headers={'X-MSBOOST-Node-Token': token, 'Content-Type': 'application/json'}, method='POST')
                 with urllib.request.urlopen(request, timeout=15) as result:
                     response = json.load(result)
                 supervisor.reconcile(response, time.monotonic() - begin)
+                print('MSBOOST synchronization OK', flush=True)
+            except urllib.error.HTTPError as error:
+                print(f'MSBOOST synchronization failed: HTTP {error.code}; check node token, site access and server configuration.', flush=True)
+            except urllib.error.URLError:
+                print('MSBOOST synchronization failed: DNS, TLS or network connection error.', flush=True)
+            except ValueError:
+                print('MSBOOST synchronization failed: invalid JSON, clock skew or invalid lease.', flush=True)
             except Exception:
                 # No request bodies, URLs with credentials, or tokens in logs.
                 print('MSBOOST synchronization failed; existing short leases remain enforced.', flush=True)

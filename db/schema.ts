@@ -38,6 +38,7 @@ export const codes = sqliteTable('email_codes', {
 export const invites = sqliteTable('invitations', {
   id: text().primaryKey(),
   code_hash: text().notNull().unique(),
+  code_encrypted: text(),
   label: text().notNull(),
   max_uses: integer().notNull(),
   uses: integer().notNull().default(0),
@@ -119,6 +120,7 @@ export const relays = sqliteTable(
     speed_mbps: integer().notNull(),
     traffic_limit_bytes: integer().notNull().default(0),
     traffic_used_bytes: integer().notNull().default(0),
+    current_bps: real(),
     suspended: integer().notNull().default(0),
     revision: integer().notNull().default(1),
     reported_state: text().notNull().default('pending'),

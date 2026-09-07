@@ -99,7 +99,6 @@ export async function settleOrder(
 }
 export async function createOrder(req: Request, u: User, b: any) {
   const s = await settings();
-  assert(s.terms_confirmed, '套餐销售尚未开放', 503);
   const plan = await one(
     'SELECT * FROM plans WHERE id=? AND enabled=1',
     b.plan_id,

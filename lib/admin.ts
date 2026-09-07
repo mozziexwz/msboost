@@ -5,6 +5,7 @@ import {
   db,
   defaultSettings,
   encrypt,
+  decrypt,
   hash,
   hex,
   int,
@@ -30,11 +31,21 @@ export async function adminSnapshot() {
   return {
     settings: s,
     lines: await rows(
-      'SELECT id,name,region,description,host,port_start,port_end,enabled,requires_front,heartbeat_at,probe_label,probe_ip FROM lines',
+      'SELECT id,name,region,description,host,port_start,port_end,enabled,requires_front,heartbeat_at,probe_label,probe_ip,rtt_ms,loss_pct,cpu_pct,memory_pct,version FROM lines',
     ),
     plans: await rows('SELECT * FROM plans ORDER BY sort'),
-    invitations: await rows(
-      'SELECT id,label,max_uses,uses,expires_at,enabled,created_at FROM invitations ORDER BY created_at DESC LIMIT 100',
+    invitations: await Promise.all(
+      (
+        await rows(
+          'SELECT id,label,max_uses,uses,expires_at,enabled,created_at,code_encrypted FROM invitations ORDER BY created_at DESC LIMIT 100',
+        )
+      ).map(async ({ code_encrypted, ...v }) => ({
+        ...v,
+        code: code_encrypted ? await decrypt(code_encrypted) : null,
+      })),
+    ),
+    relays: await rows(
+      'SELECT r.*,u.email,l.name AS line_name,l.heartbeat_at,l.enabled AS line_enabled,l.requires_front,l.rtt_ms,l.loss_pct,l.cpu_pct,l.memory_pct,l.version,(SELECT host FROM fronts WHERE relay_id=r.id) AS front_host FROM relays r JOIN users u ON u.id=r.user_id JOIN lines l ON l.id=r.line_id ORDER BY r.created_at DESC LIMIT 500',
     ),
     users: await rows(
       'SELECT id,email,role,trial_used,disabled,created_at FROM users ORDER BY created_at DESC LIMIT 200',
@@ -78,43 +89,29 @@ export async function adminAction(
   } else if (action === 'initialize') {
     await db().batch([
       ...[
-        {
-          id: 'trial',
-          name: '新人体验天卡',
-          days: 1,
-          price: 0,
-          speed: 20,
-          trial: 1,
-        },
+        { id: 'trial', name: '新人体验天卡', days: 1, price: 0, speed: 20, trial: 1 },
         { id: 'day', name: '1 天卡', days: 1, price: 0, speed: 50, trial: 0 },
         { id: 'week', name: '7 天卡', days: 7, price: 0, speed: 50, trial: 0 },
-        {
-          id: 'month',
-          name: '30 天卡',
-          days: 30,
-          price: 0,
-          speed: 50,
-          trial: 0,
-        },
-      ].map((p, i) =>
+        { id: 'month', name: '30 天卡', days: 30, price: 0, speed: 50, trial: 0 },
+      ].map((plan, sort) =>
         stmt(
           'INSERT OR IGNORE INTO plans(id,name,days,price_cents,speed_mbps,trial,enabled,sort) VALUES(?,?,?,?,?,?,0,?)',
-          p.id,
-          p.name,
-          p.days,
-          p.price,
-          p.speed,
-          p.trial,
-          i,
+          plan.id,
+          plan.name,
+          plan.days,
+          plan.price,
+          plan.speed,
+          plan.trial,
+          sort,
         ),
       ),
-      ...initialArticles.map((a) =>
+      ...initialArticles.map((article) =>
         stmt(
           'INSERT OR IGNORE INTO articles(id,kind,title,body,published,updated_at) VALUES(?,?,?,?,1,?)',
-          a.id,
-          a.kind,
-          a.title,
-          a.body,
+          article.id,
+          article.kind,
+          article.title,
+          article.body,
           now(),
         ),
       ),
@@ -352,9 +349,10 @@ export async function adminAction(
         'MS-' + hex(crypto.getRandomValues(new Uint8Array(8))).toUpperCase();
       codes.push(code);
       await stmt(
-        'INSERT INTO invitations(id,code_hash,label,max_uses,expires_at,created_at) VALUES(?,?,?,?,?,?)',
+        'INSERT INTO invitations(id,code_hash,code_encrypted,label,max_uses,expires_at,created_at) VALUES(?,?,?,?,?,?,?)',
         id(),
         await hash(code),
+        await encrypt(code),
         String(b.label || '邀请注册').slice(0, 100),
         uses,
         now() + days * DAY,
@@ -363,6 +361,57 @@ export async function adminAction(
     }
     await audit(req, u.id, 'admin.invites', String(count));
     return { codes };
+  } else if (action === 'line-delete') {
+    const lid = text(b.id, 40, '线路');
+    assert(
+      await one('SELECT id FROM lines WHERE id=?', lid),
+      '线路不存在',
+      404,
+    );
+    if (await one('SELECT id FROM relays WHERE line_id=? LIMIT 1', lid)) {
+      await stmt('UPDATE lines SET enabled=0 WHERE id=?', lid).run();
+      await audit(req, u.id, 'admin.line.archive', lid);
+      return {
+        message:
+          '线路有关联套餐，已停用并保留历史记录；现有转发将在同步或租约到期时停止',
+      };
+    }
+    await db().batch([
+      stmt('DELETE FROM line_samples WHERE line_id=?', lid),
+      stmt('DELETE FROM lines WHERE id=?', lid),
+    ]);
+  } else if (action === 'invite-delete') {
+    await stmt(
+      'DELETE FROM invitations WHERE id=?',
+      text(b.id, 40, '邀请码'),
+    ).run();
+  } else if (action === 'article-delete') {
+    const aid = text(b.id, 40, '文章');
+    assert(
+      !['terms', 'privacy', 'refund', 'aup'].includes(aid),
+      '服务条款请编辑内容，不能删除',
+    );
+    await stmt('DELETE FROM articles WHERE id=?', aid).run();
+  } else if (action === 'relay-delete') {
+    const rid = text(b.id, 40, '隧道');
+    await db().batch([
+      stmt(
+        'INSERT OR IGNORE INTO config_garbage(object_key,delete_after) SELECT object_key,? FROM config_files WHERE relay_id=?',
+        now(),
+        rid,
+      ),
+      stmt('DELETE FROM config_files WHERE relay_id=?', rid),
+      stmt('DELETE FROM fronts WHERE relay_id=?', rid),
+      stmt(
+        "UPDATE relays SET target_host='pending.invalid',target_ip='0.0.0.0',target_port=1,suspended=1,revision=revision+1,reported_state='pending' WHERE id=?",
+        rid,
+      ),
+    ]);
+    await audit(req, u.id, 'admin.relay.delete', rid);
+    return {
+      message:
+        '转发配置已删除，套餐与财务记录保留；执行机同步或租约到期后停止旧转发',
+    };
   } else if (action === 'revoke-invite')
     await stmt('UPDATE invitations SET enabled=0 WHERE id=?', b.id).run();
   else if (action === 'article') {

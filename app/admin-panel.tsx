@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dialog';
 import { Plus, RefreshCw, Save, Settings2, Trash2 } from 'lucide-react';
 import BackupCenter from './backup-center';
+import RelayAdmin from './relay-admin';
 import {
   api,
   Empty,
@@ -93,13 +94,6 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
         <div className="inline-fields">
           <Button
             variant="outline"
-            disabled={busy}
-            onClick={() => act('initialize', {})}
-          >
-            初始化默认套餐与文档
-          </Button>
-          <Button
-            variant="outline"
             size="icon"
             onClick={load}
             aria-label="刷新"
@@ -113,6 +107,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
           {[
             ['settings', '站点设置'],
             ['lines', '转发线路'],
+            ['relays', '用户转发'],
             ['plans', '套餐'],
             ['invitations', '邀请码'],
             ['orders', '订单 / 退款'],
@@ -397,18 +392,6 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
               发送测试邮件
             </Button>
           </div>
-          <div className="setting-toggle">
-            <div>
-              <b>开放套餐销售</b>
-              <p>请先确认价格、线路、付款通道以及已补充的运营条款</p>
-            </div>
-            <Switch
-              checked={s.terms_confirmed}
-              onCheckedChange={(v) =>
-                setData({ ...data, settings: { ...s, terms_confirmed: v } })
-              }
-            />
-          </div>
           <Button type="submit" disabled={busy}>
             <Save size={16} />
             {busy ? '正在保存…' : '保存设置'}
@@ -501,6 +484,21 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                       >
                         重新生成一键部署
                       </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              '删除此线路？有关联套餐时将停用线路并保留记录。',
+                            )
+                          )
+                            act('line-delete', { id: l.id });
+                        }}
+                      >
+                        删除线路
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -510,6 +508,9 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
         </>
       )}
       {tab === 'backup' && <BackupCenter />}
+      {tab === 'relays' && (
+        <RelayAdmin relays={data.relays || []} act={act} busy={busy} />
+      )}
       {tab === 'plans' && (
         <>
           <div className="subheading mt-6">
@@ -602,7 +603,7 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
           <Table>
             <TableHeader>
               <TableRow>
-                {['备注', '使用次数', '有效期', '操作'].map((l) => (
+                {['邀请码 / 备注', '使用次数', '有效期', '操作'].map((l) => (
                   <TableHead key={l}>{l}</TableHead>
                 ))}
               </TableRow>
@@ -610,7 +611,10 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
             <TableBody>
               {data.invitations.map((v: any) => (
                 <TableRow key={v.id}>
-                  <TableCell>{v.label}</TableCell>
+                  <TableCell>
+                    {v.code || '旧码仅保存哈希，无法还原'}
+                    <small>{v.label}</small>
+                  </TableCell>
                   <TableCell>
                     {v.uses}/{v.max_uses}
                   </TableCell>
@@ -623,6 +627,16 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                       onClick={() => act('revoke-invite', { id: v.id })}
                     >
                       {v.enabled ? '撤销' : '已撤销'}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        if (window.confirm('删除此邀请码？删除后将无法使用。'))
+                          act('invite-delete', { id: v.id });
+                      }}
+                    >
+                      删除
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -726,19 +740,6 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
                       >
                         {v.disabled ? '启用' : '禁用'}
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          act('user', {
-                            id: v.id,
-                            role: v.role === 'support' ? 'customer' : 'support',
-                            disabled: Boolean(v.disabled),
-                          })
-                        }
-                      >
-                        {v.role === 'support' ? '撤销客服' : '设为客服'}
-                      </Button>
                       {v.role === 'customer' && (
                         <Button
                           variant="ghost"
@@ -806,6 +807,17 @@ export default function AdminPanel({ onRefresh }: { onRefresh: () => void }) {
               >
                 编辑
               </Button>
+              {!['terms', 'privacy', 'refund', 'aup'].includes(a.id) && (
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    if (window.confirm('删除此文章？'))
+                      act('article-delete', { id: a.id });
+                  }}
+                >
+                  删除
+                </Button>
+              )}
             </div>
           ))}
         </>

@@ -27,6 +27,7 @@ const TABLES = {
   invitations: [
     'id',
     'code_hash',
+    'code_encrypted',
     'label',
     'max_uses',
     'uses',
@@ -80,6 +81,7 @@ const TABLES = {
     'speed_mbps',
     'traffic_limit_bytes',
     'traffic_used_bytes',
+    'current_bps',
     'suspended',
     'revision',
     'reported_state',

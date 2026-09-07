@@ -120,7 +120,9 @@ async function handle(req: Request) {
       });
     }
     if (path === 'node/sync' && method === 'POST') {
-      const token = req.headers.get('authorization')?.replace(/^Bearer /, '');
+      const token =
+        req.headers.get('x-msboost-node-token') ||
+        req.headers.get('authorization')?.replace(/^Bearer /, '');
       assert(token && token.length === 64, '线路凭据无效', 401);
       const line = await one(
         'SELECT * FROM lines WHERE token_hash=?',
@@ -161,7 +163,11 @@ async function handle(req: Request) {
             Number.isInteger(r.revision)
           )
             await stmt(
-              'UPDATE relays SET reported_state=?,reported_revision=?,reported_at=?,last_error=?,traffic_used_bytes=MAX(traffic_used_bytes,?) WHERE id=? AND line_id=?',
+              'UPDATE relays SET current_bps=CASE WHEN reported_at IS NOT NULL AND ?>reported_at AND ?>=traffic_used_bytes THEN (?-traffic_used_bytes)*1.0/(?-reported_at) ELSE NULL END,reported_state=?,reported_revision=?,reported_at=?,last_error=?,traffic_used_bytes=MAX(traffic_used_bytes,?) WHERE id=? AND line_id=?',
+              t,
+              num(r.traffic_bytes, 0, Number.MAX_SAFE_INTEGER) || 0,
+              num(r.traffic_bytes, 0, Number.MAX_SAFE_INTEGER) || 0,
+              t,
               r.state,
               r.revision,
               t,

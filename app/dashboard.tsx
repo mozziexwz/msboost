@@ -73,6 +73,7 @@ import VpsTools from './vps-tools';
 import AdminPanel from './admin-panel';
 import Support from './support';
 import Markdown from './markdown';
+import GuideReader from './guide-reader';
 const links = [
   { id: 'guides', icon: BookOpen, label: '教程（必看）' },
   { id: 'vps', icon: Terminal, label: 'VPS 节点部署' },
@@ -122,6 +123,7 @@ export default function Dashboard() {
     [error, setError] = useState(''),
     [success, setSuccess] = useState(''),
     [article, setArticle] = useState<any>(null);
+  const [showFront, setShowFront] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   const saving = useRef(new Set<string>());
   const refresh = useCallback(async () => {
@@ -387,7 +389,7 @@ export default function Dashboard() {
   async function logout() {
     try {
       await api('auth/logout', {});
-      setData(null);
+      setData({ user: null, settings, articles: data?.articles || [] });
       setParsed(null);
       await refresh();
     } catch (e) {
@@ -445,7 +447,7 @@ export default function Dashboard() {
           onClose={() => setAuth(false)}
           onSuccess={refresh}
           settings={settings}
-          articles={data.articles || []}
+          articles={data?.articles || []}
         />
         <ArticleDialog article={article} onClose={() => setArticle(null)} />
       </main>
@@ -817,9 +819,6 @@ export default function Dashboard() {
                       ))}
                   </div>
                 </div>
-                {!settings.terms_confirmed && (
-                  <Notice text="管理员尚未开启套餐销售。请进入管理后台 → 站点设置，打开“开放套餐销售”并保存。" />
-                )}
                 {plan && plan.price_cents > 0 && (
                   <div className="selection-block mt-5">
                     <h3>选择支付方式</h3>
@@ -847,15 +846,8 @@ export default function Dashboard() {
                       : '请选择套餐时长'}
                     <small>套餐最长 31 天；新套餐流量覆盖原额度，不叠加</small>
                   </span>
-                  <Button
-                    disabled={busy || !plan || !settings.terms_confirmed}
-                    onClick={order}
-                  >
-                    {!settings.terms_confirmed
-                      ? '管理员未开放销售'
-                      : plan?.price_cents === 0
-                        ? '立即领取'
-                        : '创建订单'}
+                  <Button disabled={busy || !plan} onClick={order}>
+                    {plan?.price_cents === 0 ? '立即领取' : '创建订单'}
                     <ArrowRight size={16} />
                   </Button>
                 </div>
@@ -1141,40 +1133,39 @@ export default function Dashboard() {
             />
           )}
           {view === 'relay' && activeSubscription && (
-            <VpsTools
-              user={user}
-              settings={settings}
-              relays={myRelays}
-              onLogin={() => setAuth(true)}
-              frontOnly
-            />
+            <section className="panel mt-6">
+              <h2>前置入口（可选）</h2>
+              <p>
+                {activeSubscription.requires_front
+                  ? '当前线路要求自备前置机，请完成部署后下载前置配置。'
+                  : '所有线路均支持自备前置机，也可以直接使用中转配置。'}
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => setShowFront(!showFront)}
+              >
+                {showFront ? '收起前置机设置' : '配置自备前置机'}
+              </Button>
+            </section>
           )}
+          {view === 'relay' &&
+            activeSubscription &&
+            (showFront || Boolean(activeSubscription.requires_front)) && (
+              <VpsTools
+                user={user}
+                settings={settings}
+                relays={myRelays}
+                onLogin={() => setAuth(true)}
+                frontOnly
+              />
+            )}
           {view === 'tickets' && (
             <Support user={user} onLogin={() => setAuth(true)} />
           )}
           {view === 'admin' && user.role === 'admin' && (
             <AdminPanel onRefresh={refresh} />
           )}
-          {view === 'guides' && (
-            <section className="panel">
-              <h2>使用指南与服务条款</h2>
-              {data.articles
-                .filter((a: any) => a.kind !== 'notice')
-                .map((a: any) => (
-                  <button
-                    key={a.id}
-                    className="article-row w-full text-left"
-                    onClick={() => setArticle(a)}
-                  >
-                    <span>
-                      <BookOpen size={17} className="inline mr-3" />
-                      {a.title}
-                    </span>
-                    <ChevronRight size={17} />
-                  </button>
-                ))}
-            </section>
-          )}
+          {view === 'guides' && <GuideReader articles={data.articles} />}
           <footer className="page-footer">
             <span>© {new Date().getFullYear()} MSBOOST</span>
             <div>
